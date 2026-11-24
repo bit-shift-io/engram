@@ -1,0 +1,6 @@
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 16
+seed: 0
+run_dir: runs
