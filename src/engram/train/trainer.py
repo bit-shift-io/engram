@@ -47,7 +47,9 @@ def _trainable_state(eng) -> dict:
 
 
 def save_checkpoint(eng, opt, step: int, path: Path) -> None:
-    torch.save({"step": step, "params": _trainable_state(eng), "opt": opt.state_dict()}, path)
+    buffers = {n: b.detach().clone() for n, b in eng.encoder.proj.named_buffers()}
+    torch.save({"step": step, "params": _trainable_state(eng), "proj_buffers": buffers,
+                "opt": opt.state_dict()}, path)
 
 
 def load_checkpoint(eng, path, opt=None) -> int:
@@ -57,6 +59,10 @@ def load_checkpoint(eng, path, opt=None) -> int:
     with torch.no_grad():
         for n, v in ck["params"].items():
             named[n].copy_(v)
+        bufs = dict(eng.encoder.proj.named_buffers())
+        for n, v in ck.get("proj_buffers", {}).items():
+            if n in bufs:
+                bufs[n].copy_(v)
     if opt is not None:
         opt.load_state_dict(ck["opt"])
     return ck["step"]
@@ -73,7 +79,8 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
     else:
         run_dir = Path(cfg.run_dir) / time.strftime("%Y%m%d-%H%M%S")
         run_dir.mkdir(parents=True)
-        (run_dir / "config.yaml").write_text(yaml.safe_dump(asdict(cfg)))
+        cfg_dict = {k: list(v) if isinstance(v, tuple) else v for k, v in asdict(cfg).items()}
+        (run_dir / "config.yaml").write_text(yaml.safe_dump(cfg_dict))
     params = eng.trainable_parameters()
     opt = torch.optim.Adam(param_groups(eng, cfg), lr=cfg.lr)
     if cfg.resume:

@@ -32,8 +32,8 @@ def make_tiny_model(hidden=64, layers=2):
 def tiny_engram():
     from engram.model.engram import Engram
 
-    def build(chunk_size=8, k=4):
-        cfg = Config(chunk_size=chunk_size, k=k)
+    def build(chunk_size=8, k=4, **cfg_kw):
+        cfg = Config(chunk_size=chunk_size, k=k, **cfg_kw)
         return Engram(make_tiny_model(), make_tiny_tokenizer(), cfg)
 
     return build

@@ -20,11 +20,17 @@ class Engram(nn.Module):
         self.hidden_size = emb.shape[1]
         embed_rms = float(emb.pow(2).mean().sqrt())
         self.eos_id = tokenizer.eos_token_id
-        self.lm = add_lora(base_model)
+        self.lm = add_lora(base_model, cfg.lora_r, cfg.lora_alpha, cfg.lora_targets,
+                           decoder=cfg.decoder_lora)
         ctrl_init = torch.randn(len(self.control_ids), self.hidden_size) * embed_rms
         self.control = ControlEmbedding(self.control_ids, ctrl_init)
-        self.encoder = Encoder(self.lm, cfg.chunk_size, cfg.k, self.hidden_size, embed_rms)
-        self.decoder = Decoder(self.lm, self.control)
+        self.encoder = Encoder(self.lm, cfg.chunk_size, cfg.k, self.hidden_size, embed_rms,
+                               center=cfg.center_memory,
+                               segment_residual=cfg.memory_segment_residual,
+                               layer=cfg.memory_layer, mask_dims=cfg.memory_mask_dims,
+                               pooled_residual=cfg.memory_pooled_residual)
+        self.decoder = Decoder(self.lm, self.control, use_lora=cfg.decoder_lora,
+                               input_dropout=cfg.decoder_input_dropout, dropout_id=self.eos_id)
         self.to(cfg.device)
 
     def trainable_parameters(self):

@@ -26,16 +26,36 @@ class RMSNorm(nn.Module):
 
 
 class MemoryProjection(nn.Module):
-    """Linear (identity init) + RMSNorm scaled to the token-embedding RMS."""
+    """[centre] + Linear (identity init) + RMSNorm scaled to the token-embedding RMS.
 
-    def __init__(self, d: int, embed_rms: float):
+    Hidden states at the query slots are >90% a chunk-independent component (SmolLM2's massive
+    activations), so after RMSNorm every chunk's memory looks the same. With k > 0 a per-slot
+    running mean (EMA over training batches, fixed in eval) is subtracted first, leaving the
+    chunk-specific part to fill the normalised vector.
+    """
+
+    def __init__(self, d: int, embed_rms: float, k: int = 0, momentum: float = 0.05):
         super().__init__()
         self.linear = nn.Linear(d, d)
         nn.init.eye_(self.linear.weight)
         nn.init.zeros_(self.linear.bias)
         self.norm = RMSNorm(d, scale=embed_rms)
+        self.momentum = momentum
+        self.register_buffer("mean", torch.zeros(k, d) if k else None)
+        self.register_buffer("seeded", torch.tensor(False))
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
+        """h [B, K, d]."""
+        if self.mean is not None:
+            if self.training:
+                with torch.no_grad():
+                    batch_mean = h.detach().mean(0)
+                    if not bool(self.seeded):
+                        self.mean.copy_(batch_mean)
+                        self.seeded.fill_(True)
+                    else:
+                        self.mean.lerp_(batch_mean, self.momentum)
+            h = h - self.mean
         return self.norm(self.linear(h))
 
 

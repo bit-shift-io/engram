@@ -94,3 +94,21 @@ def test_init_from_loads_checkpoint_params(tmp_path):
     train(eng, cfg2, tr, va)
     named = dict(eng.named_parameters())
     assert all(torch.equal(named[n], v) for n, v in torch.load(ck)["params"].items())
+
+
+def test_frozen_decoder_trainer_step_updates_encoder_side_only(tmp_path):
+    """decoder_lora=False: the trainer must still update encoder LoRA, queries and projection
+    (disable_adapter() in the decoder must not freeze or detach the encoder adapter)."""
+    torch.manual_seed(0)
+    cfg = cfg_for(tmp_path, steps=2, decoder_lora=False, val_interval=100, ckpt_interval=100)
+    eng = build(cfg)
+    assert not any(".decoder." in n for n, _ in eng.named_parameters() if "lora_" in n)
+    before = {n: p.detach().clone() for n, p in eng.named_parameters() if p.requires_grad}
+    tr, va = data()
+    train(eng, cfg, tr, va)
+    named = dict(eng.named_parameters())
+    changed = {n for n, v in before.items() if not torch.equal(v, named[n])}
+    assert any("lora_B" in n and ".encoder." in n for n in changed)
+    assert any(n.startswith("encoder.queries") for n in changed)
+    assert any(n.startswith("encoder.proj") for n in changed)
+    assert all(p.requires_grad for n, p in named.items() if "lora_" in n)

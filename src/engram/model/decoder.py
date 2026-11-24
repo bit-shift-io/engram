@@ -1,5 +1,7 @@
 """Decoder: [memory][control][target] -> teacher-forced loss, or greedy generation."""
 
+import contextlib
+
 import torch
 from torch import nn
 
@@ -7,29 +9,44 @@ from engram.model.base import use_adapter
 
 
 class Decoder(nn.Module):
-    def __init__(self, model, control):
+    def __init__(self, model, control, use_lora: bool = True, input_dropout: float = 0.0,
+                 dropout_id: int = 0):
         super().__init__()
+        # Training only: replace this fraction of teacher-forced target *inputs* (labels kept) by
+        # dropout_id, so the decoder can't reconstruct from context alone and must read memory.
+        self.input_dropout, self.dropout_id = input_dropout, dropout_id
         self.model = model
         self.control = control
+        self.use_lora = use_lora  # False: run the frozen base (all adapters disabled)
+
+    def _ctx(self):
+        if self.use_lora:
+            use_adapter(self.model, "decoder")
+            return contextlib.nullcontext()
+        return self.model.disable_adapter()
 
     def _prefix(self, memory: torch.Tensor, control_ids: torch.Tensor) -> torch.Tensor:
         return torch.cat([memory, self.control(control_ids)], dim=1)
 
     def _run(self, x: torch.Tensor, labels=None, attention_mask=None):
         # Default position ids start at 0, at the first memory vector.
-        use_adapter(self.model, "decoder")
-        if attention_mask is None:
-            return self.model(inputs_embeds=x, labels=labels)
-        # Padded positions are skipped, so real positions stay contiguous from 0.
-        pos = (attention_mask.cumsum(-1) - 1).clamp(min=0)
-        return self.model(inputs_embeds=x, labels=labels, attention_mask=attention_mask,
-                          position_ids=pos)
+        with self._ctx():
+            if attention_mask is None:
+                return self.model(inputs_embeds=x, labels=labels)
+            # Padded positions are skipped, so real positions stay contiguous from 0.
+            pos = (attention_mask.cumsum(-1) - 1).clamp(min=0)
+            return self.model(inputs_embeds=x, labels=labels, attention_mask=attention_mask,
+                              position_ids=pos)
 
     def loss(self, memory, control_ids, target_ids, memory_mask=None,
              target_mask=None) -> torch.Tensor:
         """memory_mask [B, M] / target_mask [B, T] (1 = real) allow right-padded batches."""
         prefix = self._prefix(memory, control_ids)
-        tgt = self.model.get_input_embeddings()(target_ids)
+        inp = target_ids
+        if self.training and self.input_dropout > 0:
+            drop = torch.rand(target_ids.shape, device=target_ids.device) < self.input_dropout
+            inp = target_ids.masked_fill(drop, self.dropout_id)
+        tgt = self.model.get_input_embeddings()(inp)
         ignore = torch.full(prefix.shape[:2], -100, dtype=torch.long, device=target_ids.device)
         labels = target_ids if target_mask is None else target_ids.masked_fill(target_mask == 0, -100)
         labels = torch.cat([ignore, labels], dim=1)
@@ -47,11 +64,11 @@ class Decoder(nn.Module):
         """Greedy decode for a single example (batch 1)."""
         x = self._prefix(memory, control_ids)
         emb = self.model.get_input_embeddings()
-        use_adapter(self.model, "decoder")
         out: list[int] = []
         past = None
         for _ in range(max_new_tokens):
-            r = self.model(inputs_embeds=x, past_key_values=past, use_cache=True)
+            with self._ctx():
+                r = self.model(inputs_embeds=x, past_key_values=past, use_cache=True)
             past = r.past_key_values
             nxt = int(r.logits[0, -1].argmax())
             if nxt == eos_id:

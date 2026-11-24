@@ -36,16 +36,17 @@ def generate(model, input_ids: torch.Tensor, device: str, max_new_tokens: int = 
 ADAPTERS = ("encoder", "decoder")
 
 
-def add_lora(model: PreTrainedModel, r: int = 8, alpha: int = 16):
-    """Wrap a frozen model with two named LoRA adapters: `encoder` and `decoder`."""
+def add_lora(model: PreTrainedModel, r: int = 8, alpha: int = 16,
+             targets=("q_proj", "k_proj", "v_proj", "o_proj"), decoder: bool = True):
+    """Wrap a frozen model with named LoRA adapters: `encoder`, plus `decoder` if requested."""
     from peft import LoraConfig, get_peft_model
 
     def lora_cfg():
-        return LoraConfig(r=r, lora_alpha=alpha, lora_dropout=0.0,
-                          target_modules=["q_proj", "k_proj", "v_proj", "o_proj"])
+        return LoraConfig(r=r, lora_alpha=alpha, lora_dropout=0.0, target_modules=list(targets))
 
     peft_model = get_peft_model(model, lora_cfg(), adapter_name=ADAPTERS[0])
-    peft_model.add_adapter(ADAPTERS[1], lora_cfg())
+    if decoder:
+        peft_model.add_adapter(ADAPTERS[1], lora_cfg())
     use_adapter(peft_model, ADAPTERS[0])
     return peft_model
 

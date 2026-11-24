@@ -21,6 +21,24 @@ class Config:
     data_cache: str = "data/cache"
     train_samples: int = 6400  # 128-token chunks
     val_samples: int = 64
+    # LoRA (encoder and decoder adapters share r/alpha/targets)
+    lora_r: int = 8
+    lora_alpha: int = 16
+    lora_targets: tuple[str, ...] = ("q_proj", "k_proj", "v_proj", "o_proj")
+    # False: the decoder is the frozen base model, so it can only lower the loss via memory
+    decoder_lora: bool = True
+    # subtract a running per-slot mean from encoder hidden states before projecting to memory
+    center_memory: bool = False
+    # memory slot i += RMS-scaled mean input embedding of chunk tokens [i*C/K, (i+1)*C/K)
+    memory_segment_residual: bool = False
+    # encoder hidden_states index for memory (-1 = final normed output; SmolLM2 has 30 layers)
+    memory_layer: int = -1
+    # hidden dims zeroed before the memory projection (SmolLM2 massive activations: 17, 507)
+    memory_mask_dims: tuple[int, ...] = ()
+    # memory slot i += proj(mean encoder hidden state over chunk tokens [i*C/K, (i+1)*C/K))
+    memory_pooled_residual: bool = False
+    # fraction of decoder teacher-forcing inputs replaced by EOS in training (word dropout)
+    decoder_input_dropout: float = 0.0
     # training
     lr: float = 2e-3
     steps: int = 800  # optimizer steps
@@ -50,4 +68,7 @@ def load_config(path: str | Path, overrides: dict[str, Any] | None = None) -> Co
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(f"Unknown config fields: {', '.join(unknown)}")
+    for key in ("lora_targets", "memory_mask_dims"):
+        if key in data:
+            data[key] = tuple(data[key])
     return replace(Config(), **data)
