@@ -46,6 +46,29 @@ class Engram(nn.Module):
         target = torch.cat([chunk_ids, eos], dim=1)
         return self.decoder.loss(memory, self._control(density, b), target)
 
+    def terse_loss(self, examples: list[dict]) -> torch.Tensor:
+        """Summary loss over examples {chunks [n_i, C], target [T_i], density}; memory and
+        targets are right-padded and masked so variable chunk counts batch together."""
+        dev, k = self.cfg.device, self.cfg.k
+        counts = [len(e["chunks"]) for e in examples]
+        flat = torch.cat([e["chunks"] for e in examples]).to(dev)
+        mem = self.encode(flat.reshape(1, -1))[0].reshape(len(flat), k, -1)
+        b, m = len(examples), max(counts) * k
+        memory = mem.new_zeros(b, m, mem.shape[-1])
+        mmask = torch.zeros(b, m, dtype=torch.long, device=dev)
+        t = max(len(e["target"]) for e in examples)
+        target = torch.full((b, t), self.eos_id, dtype=torch.long, device=dev)
+        tmask = torch.zeros(b, t, dtype=torch.long, device=dev)
+        start = 0
+        for i, (e, n) in enumerate(zip(examples, counts)):
+            memory[i, : n * k] = mem[start : start + n].reshape(n * k, -1)
+            mmask[i, : n * k] = 1
+            start += n
+            target[i, : len(e["target"])] = e["target"].to(dev)
+            tmask[i, : len(e["target"])] = 1
+        density = examples[0]["density"]
+        return self.decoder.loss(memory, self._control(density, b), target, mmask, tmask)
+
     def tokenize_chunks(self, text: str) -> torch.Tensor:
         """Token ids [1, N*chunk_size], right-padded with EOS to a whole number of chunks."""
         ids = self.tokenizer(text, add_special_tokens=False).input_ids

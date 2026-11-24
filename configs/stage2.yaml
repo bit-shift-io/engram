@@ -1,0 +1,32 @@
+# Stage 2: mixed <full> (WikiText) / <terse> (XSum) from a Stage 1 checkpoint.
+# Run: uv run scripts/train.py --config configs/stage2.yaml --init-from runs/<stage1>/ckpt-800.pt
+# Budget at ~0.95 s per 128-token chunk fwd+bwd (Intel CPU):
+#   <full> micro-batch  = 4 chunks              ~  3.8 s
+#   <terse> micro-batch = 4 articles x <=4 chunks ~ 15.2 s worst case (summary decode is short)
+#   full_ratio 0.5 -> ~9.5 s per micro-batch, x grad_accum 2 = ~19 s per step
+#   500 steps x 19 s ~ 2.6 h, + 5 val passes (64 chunks + 32 articles ~ 1.5 min each) ~ 8 min
+#   ~2.8 h worst case, under the 4 h limit.
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 16
+seed: 0
+run_dir: runs
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 6400
+val_samples: 64
+lr: 0.001
+encoder_lr_scale: 0.1
+full_ratio: 0.5
+terse_dataset: EdinburghNLP/xsum
+terse_train_samples: 2000
+terse_val_samples: 32
+max_chunks: 4
+max_summary_tokens: 64
+steps: 500
+batch_size: 4
+grad_accum: 2
+warmup_steps: 20
+val_interval: 100
+ckpt_interval: 100

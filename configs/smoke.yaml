@@ -1,0 +1,11 @@
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+dataset_config: wikitext-2-raw-v1
+train_samples: 40
+val_samples: 8
+steps: 5
+batch_size: 2
+grad_accum: 1
+warmup_steps: 1
+val_interval: 5
+ckpt_interval: 5

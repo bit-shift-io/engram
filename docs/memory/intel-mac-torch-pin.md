@@ -7,6 +7,7 @@ The only dev and training machine is an Intel MacBook (i7-9750H, 6 cores, 16GB R
 
 - `torch==2.2.2` is the last release with Intel macOS wheels. Don't bump torch.
 - Python 3.12, managed by `uv`. The system Python (3.15) isn't supported.
-- `numpy<2`. Pin `transformers`/`peft` to versions compatible with torch 2.2.
+- `numpy<2`. Pin `transformers`/`peft` to versions compatible with torch 2.2 (currently transformers 4.46.3, peft 0.13.2).
+- `datasets` pulls a pyarrow that needs numpy 2 — keep `pyarrow<17`.
 - Use `torch.set_num_threads(6)`.
 - Keep the device in config. Code must also run on `cuda` without edits.

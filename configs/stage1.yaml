@@ -1,0 +1,19 @@
+# Budget: ~1.2 s per 128-token chunk fwd+bwd (idle Intel CPU).
+# 800 steps x 8 chunks = 6400 chunks ~ 2.1 h, + 8 val passes x 64 chunks (~0.4 s each) ~ 4 min.
+# ~2.5 h idle, leaving headroom for load under the 4 h limit.
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 16
+seed: 0
+run_dir: runs
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 6400
+val_samples: 64
+lr: 0.002
+steps: 800
+batch_size: 4
+grad_accum: 2
+val_interval: 100
+ckpt_interval: 200
