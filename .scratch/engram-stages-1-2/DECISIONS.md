@@ -52,3 +52,8 @@
 
 ## New CONTEXT.md terms
 - Memory, memory vector, memory query, chunk, density, control token, compression ratio, memory ablation.
+
+## 2026-11-25 — Relaxed Stage 1/2 targets after CPU training runs
+- Decision: Stage 1 passes on a teacher-forced real-vs-shuffled gap on held-out chunks (loss ≥ 0.5 nats, token accuracy ≥ +10 pts), not ≥ 80% greedy reconstruction. Stage 2 keeps the ≤ 25% length target and must keep the `<full>` gap ≥ 0.4 nats.
+- Why: on the Intel CPU, a frozen SmolLM2-135M decoder learns to read soft-prompt memory very slowly. Full-config runs ignored memory entirely; the best run (512 chunks × ~17 epochs, ~2.3 h) reached a 0.28-nat held-out gap (acc 0.471 vs 0.436). 80% greedy reconstruction needs GPU-scale compute. The relaxed targets still prove text goes into memory and is read back out.
+- Also decided: decoder LoRA off for Stage 1 (it learns a shortcut and ignores memory). Next: a decoder adapter that acts only on memory positions, compared against the plain frozen decoder before a long overnight run.

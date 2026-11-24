@@ -30,7 +30,8 @@ class Engram(nn.Module):
                                layer=cfg.memory_layer, mask_dims=cfg.memory_mask_dims,
                                pooled_residual=cfg.memory_pooled_residual)
         self.decoder = Decoder(self.lm, self.control, use_lora=cfg.decoder_lora,
-                               input_dropout=cfg.decoder_input_dropout, dropout_id=self.eos_id)
+                               input_dropout=cfg.decoder_input_dropout, dropout_id=self.eos_id,
+                               memory_adapter_rank=cfg.decoder_memory_adapter_rank)
         self.to(cfg.device)
 
     def trainable_parameters(self):

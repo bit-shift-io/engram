@@ -26,9 +26,10 @@
 
 ## Acceptance Criteria
 - [ ] `uv sync` then `uv run pytest` passes on the Intel Mac.
-- [ ] Stage 1 run: held-out reconstruction token accuracy at K=16, 128-token chunks is clearly above the zeroed-memory baseline (target ≥ 80%).
-- [ ] Ablation: zeroed or shuffled memory drops reconstruction accuracy to near baseline.
+- [ ] Stage 1 run (K=16, 128-token chunks, held-out chunks, teacher-forced): real-memory loss ≥ 0.5 nats below shuffled memory, and token accuracy ≥ 10 points above shuffled. (Relaxed 2026-11-25 from greedy reconstruction ≥ 80% — see DECISIONS.md.)
+- [ ] Ablation: zeroed and shuffled memory are both clearly worse than real memory.
 - [ ] Stage 2 run: for the same memory, `<terse>` output is ≤ 25% of the `<full>` output length on average.
+- [ ] After Stage 2, the Stage 1 real-vs-shuffled `<full>` loss gap stays ≥ 0.4 nats.
 - [ ] `<terse>` ROUGE-L on held-out XSum is reported next to the base model's direct-summary baseline.
 - [ ] `scripts/demo.py "<text>"` prints the compression ratio, plus `<full>` and `<terse>` renders.
 

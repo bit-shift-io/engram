@@ -70,3 +70,12 @@ Teacher-forced, 16 chunks each:
 
 ## Not run
 Stage 2 — Stage 1 hasn't passed, so training <terse> on top would test nothing.
+
+## Option 2 — memory-position K/V adapter (2026-11-25)
+512 chunks, 500 steps x bs4, lr 2e-3, frozen decoder, seed 0. Held-out teacher-forced, 16 chunks.
+| Run | real / shuffled / zeroed loss | acc real / shuffled |
+|---|---|---|
+| (a) plain frozen | 2.841 / 2.839 / 3.788 | 0.465 / 0.465 |
+| (b) adapter r8 | 2.581 / 2.699 / 3.303 | 0.473 / 0.468 |
+| (c) adapter r32 | 2.655 / 2.652 / 3.571 | 0.479 / 0.479 |
+r8 gives a 0.118-nat held-out gap (single seed); r32 none. stage1.yaml now: 2000 chunks, 3000 steps, adapter rank 8.

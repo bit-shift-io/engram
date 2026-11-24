@@ -27,6 +27,9 @@ class Config:
     lora_targets: tuple[str, ...] = ("q_proj", "k_proj", "v_proj", "o_proj")
     # False: the decoder is the frozen base model, so it can only lower the loss via memory
     decoder_lora: bool = True
+    # >0: low-rank k/v deltas applied at memory positions only in every decoder layer (reads
+    # memory better, can't memorise targets). 0 = off.
+    decoder_memory_adapter_rank: int = 0
     # subtract a running per-slot mean from encoder hidden states before projecting to memory
     center_memory: bool = False
     # memory slot i += RMS-scaled mean input embedding of chunk tokens [i*C/K, (i+1)*C/K)

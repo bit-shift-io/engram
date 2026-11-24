@@ -8,10 +8,53 @@ from torch import nn
 from engram.model.base import use_adapter
 
 
+class MemoryKVAdapter(nn.Module):
+    """Low-rank deltas on every layer's k_proj/v_proj output at memory positions only.
+
+    Target-token keys/values and all Q/O/MLP stay the frozen base, so these params change how
+    memory is *read* but cannot store the target text. Forward hooks add the delta to the first
+    `n_mem` sequence positions; n_mem is 0 (a no-op) except inside Decoder calls, so the encoder
+    and KV-cached generation steps after the prefix are untouched.
+    """
+
+    def __init__(self, model, rank: int, alpha: float | None = None):
+        super().__init__()
+        self.n_mem = 0
+        self.scale = (alpha or 2 * rank) / rank
+        mods = [m for n, m in model.named_modules()
+                if n.endswith("self_attn.k_proj") or n.endswith("self_attn.v_proj")]
+        self.A, self.B = nn.ParameterList(), nn.ParameterList()
+        for i, m in enumerate(mods):
+            lin = m.base_layer if hasattr(m, "base_layer") else m
+            d_in, d_out = lin.in_features, lin.out_features
+            self.A.append(nn.Parameter(torch.randn(rank, d_in) / d_in ** 0.5))
+            self.B.append(nn.Parameter(torch.zeros(d_out, rank)))
+            m.register_forward_hook(self._hook(i))
+
+    def _hook(self, i: int):
+        def hook(module, args, out):
+            n = self.n_mem
+            if n <= 0:
+                return None
+            x = args[0][:, :n]
+            delta = (x @ self.A[i].t()) @ self.B[i].t() * self.scale
+            return torch.cat([out[:, :n] + delta, out[:, n:]], dim=1)
+        return hook
+
+    @contextlib.contextmanager
+    def memory(self, n: int):
+        prev, self.n_mem = self.n_mem, n
+        try:
+            yield
+        finally:
+            self.n_mem = prev
+
+
 class Decoder(nn.Module):
     def __init__(self, model, control, use_lora: bool = True, input_dropout: float = 0.0,
-                 dropout_id: int = 0):
+                 dropout_id: int = 0, memory_adapter_rank: int = 0):
         super().__init__()
+        self.mem_adapter = MemoryKVAdapter(model, memory_adapter_rank) if memory_adapter_rank else None
         # Training only: replace this fraction of teacher-forced target *inputs* (labels kept) by
         # dropout_id, so the decoder can't reconstruct from context alone and must read memory.
         self.input_dropout, self.dropout_id = input_dropout, dropout_id
@@ -24,6 +67,9 @@ class Decoder(nn.Module):
             use_adapter(self.model, "decoder")
             return contextlib.nullcontext()
         return self.model.disable_adapter()
+
+    def _mem(self, n: int):
+        return self.mem_adapter.memory(n) if self.mem_adapter is not None else contextlib.nullcontext()
 
     def _prefix(self, memory: torch.Tensor, control_ids: torch.Tensor) -> torch.Tensor:
         return torch.cat([memory, self.control(control_ids)], dim=1)
@@ -57,7 +103,8 @@ class Decoder(nn.Module):
             tm = target_mask if target_mask is not None else torch.ones_like(target_ids)
             ctrl = torch.ones(b, control_ids.shape[1], dtype=torch.long, device=dev)
             attn = torch.cat([mm.long(), ctrl, tm.long()], dim=1)
-        return self._run(torch.cat([prefix, tgt], dim=1), labels, attn).loss
+        with self._mem(memory.shape[1]):
+            return self._run(torch.cat([prefix, tgt], dim=1), labels, attn).loss
 
     @torch.no_grad()
     def generate(self, memory, control_ids, max_new_tokens: int, eos_id: int) -> list[int]:
@@ -67,7 +114,8 @@ class Decoder(nn.Module):
         out: list[int] = []
         past = None
         for _ in range(max_new_tokens):
-            with self._ctx():
+            # Memory is only in the first (prefix) call; cached steps add new tokens only.
+            with self._ctx(), self._mem(memory.shape[1] if past is None else 0):
                 r = self.model(inputs_embeds=x, past_key_values=past, use_cache=True)
             past = r.past_key_values
             nxt = int(r.logits[0, -1].argmax())

@@ -27,7 +27,8 @@ def lr_at(step: int, cfg: Config) -> float:
 
 
 def _is_encoder_param(name: str) -> bool:
-    return name.startswith("encoder.") or ("lora_" in name and ".encoder." in name)
+    return (name.startswith("encoder.") or name.startswith("decoder.mem_adapter.")
+            or ("lora_" in name and ".encoder." in name))
 
 
 def param_groups(eng, cfg: Config) -> list[dict]:

@@ -1,9 +1,13 @@
-# Budget: ~0.95-1.2 s per 128-token chunk fwd+bwd (Intel CPU; frozen-decoder runs measured ~0.85 s).
-# 800 steps x 8 chunks = 6400 chunks ~ 1.7-2.1 h, + 8 val passes x 64 chunks (~0.4 s each) ~ 4 min.
-# ~2.5 h worst case, leaving headroom for load under the 4 h limit.
-# decoder_lora: false -- with a decoder LoRA the decoder memorises chunks / learns a constant
-# soft prompt and ignores memory (64-chunk run: train acc real 0.637 vs shuffled 0.631).
-# Frozen decoder: the only way to beat the LM prior is through memory.
+# Budget: measured ~0.84 s per 128-token chunk fwd+bwd (frozen decoder + memory adapter, idle
+# Intel CPU), up to ~1.2 s under load.
+# 3000 steps x 4 chunks = 12000 chunk passes (2000 chunks x 6 epochs) ~ 2.8 h idle / ~4.0 h loaded,
+# + 10 val passes x 64 chunks (~0.4 s each) ~ 4 min.
+# decoder_lora: false -- a decoder LoRA memorises chunks / learns a constant soft prompt and
+# ignores memory. decoder_memory_adapter_rank: 8 -- low-rank k/v deltas at memory positions only
+# (cannot store target text). 500-step test on 512 chunks: held-out real 2.581 vs shuffled 2.699
+# (plain frozen decoder: 2.841 vs 2.839). Rank 32 showed no gap.
+# train_samples 2000 is a new data cache: the first run streams WikiText (needs the Hub,
+# outside the sandbox).
 model_name: HuggingFaceTB/SmolLM2-135M
 device: cpu
 chunk_size: 128
@@ -12,12 +16,13 @@ seed: 0
 run_dir: runs
 dataset: wikitext
 dataset_config: wikitext-103-raw-v1
-train_samples: 6400
+train_samples: 2000
 val_samples: 64
 lr: 0.002
-steps: 800
+steps: 3000
 batch_size: 4
-grad_accum: 2
-val_interval: 100
-ckpt_interval: 200
+grad_accum: 1
+val_interval: 300
+ckpt_interval: 500
 decoder_lora: false
+decoder_memory_adapter_rank: 8
