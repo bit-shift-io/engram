@@ -83,3 +83,33 @@ def test_control_vectors_checkpoint_roundtrip(tiny_engram, tmp_path):
     eng2 = tiny_engram(chunk_size=8, k=4, decoder_lora=False, control_vectors=True)
     load_checkpoint(eng2, tmp_path / "c.pt")
     assert torch.equal(eng.decoder.ctrl_vec.vec, eng2.decoder.ctrl_vec.vec)
+
+
+def _stage2_shaped_checkpoint(eng, path):
+    """Save, then cut the control rows back to Stage 2's two flags (<full>, <terse>)."""
+    save_checkpoint(eng, torch.optim.Adam(eng.trainable_parameters()), 600, path)
+    ck = torch.load(path)
+    for n in ("control.weight", "decoder.ctrl_vec.vec"):
+        ck["params"][n] = ck["params"][n][:2].clone()
+    torch.save(ck, path)
+    return ck
+
+
+def test_stage2_checkpoint_expands_on_load_with_zero_answer_vector(tiny_engram, tmp_path):
+    eng = tiny_engram(chunk_size=8, k=4, control_vectors=True)
+    _randomise(eng)
+    ck = _stage2_shaped_checkpoint(eng, tmp_path / "s2.pt")
+    eng2 = tiny_engram(chunk_size=8, k=4, control_vectors=True)
+    _randomise(eng2)
+    assert load_checkpoint(eng2, tmp_path / "s2.pt") == 600
+    vec, ctrl = eng2.decoder.ctrl_vec.vec, eng2.control.weight
+    assert vec.shape[0] == 3 and ctrl.shape[0] == 3
+    assert torch.equal(vec[:2], ck["params"]["decoder.ctrl_vec.vec"])
+    assert torch.equal(ctrl[:2], ck["params"]["control.weight"])
+    assert torch.count_nonzero(vec[2]) == 0
+    # Stage 2 behaviour unchanged: <full>/<terse> losses match the source model
+    eng.eval(), eng2.eval()
+    chunks = torch.randint(2, 64, (2, 8))
+    with torch.no_grad():
+        for d in ("full", "terse"):
+            assert torch.allclose(eng.loss(chunks, d), eng2.loss(chunks, d))

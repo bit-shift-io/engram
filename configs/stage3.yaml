@@ -1,0 +1,44 @@
+# Stage 3: QA from memory. 50% <answer> (SQuAD), 25% <full> replay (half 1-chunk WikiText, half
+# whole XSum article), 25% <terse> XSum replay, from the Stage 2 checkpoint. K stays 16.
+# Run: uv run scripts/train.py --config configs/stage3.yaml --init-from runs/20261125-163535/ckpt-600.pt
+# LRs as Stage 2: decoder LoRA 3e-4 (higher made it ignore memory, docs/memory/decoder-ignores-memory.md);
+# encoder side x 0.33. Model shape must match Stage 2 so the checkpoint loads.
+# Budget (timed from ckpt-600 on this CPU): micro-batches <answer> ~4 s, 1-chunk <full> ~4 s,
+#   <terse> ~6-8 s, whole-article <full> ~20-28 s -> expected ~14 s per step (grad_accum 2); plan 16 s.
+#   640 steps x 16 s ~ 2.85 h. Each val (losses + QA gen x3 conditions + density gen on 8) ~ 6 min,
+#   7 vals (every 100 + final) ~ 42 min. Total ~ 3.6 h, under 4 h.
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 16
+seed: 0
+run_dir: runs
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 6400
+val_samples: 64
+lr: 0.0003
+encoder_lr_scale: 0.33
+answer_ratio: 0.5
+full_ratio: 0.5
+multi_full_ratio: 0.5
+terse_dataset: EdinburghNLP/xsum
+terse_train_samples: 2000
+terse_val_samples: 32
+qa_dataset: rajpurkar/squad
+qa_train_samples: 3200
+qa_val_samples: 32
+max_chunks: 4
+max_summary_tokens: 64
+# per-val generation: QA F1 real/shuffled/zeroed + density on 8 examples
+val_gen_samples: 8
+val_max_full_tokens: 0
+steps: 640
+batch_size: 4
+grad_accum: 2
+warmup_steps: 20
+val_interval: 100
+ckpt_interval: 100
+decoder_lora: true
+decoder_memory_adapter_rank: 8
+control_vectors: true

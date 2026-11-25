@@ -140,8 +140,9 @@ class Decoder(nn.Module):
                               position_ids=pos)
 
     def loss(self, memory, control_ids, target_ids, memory_mask=None,
-             target_mask=None) -> torch.Tensor:
-        """memory_mask [B, M] / target_mask [B, T] (1 = real) allow right-padded batches."""
+             target_mask=None, label_mask=None) -> torch.Tensor:
+        """memory_mask [B, M] / target_mask [B, T] (1 = real) allow right-padded batches.
+        label_mask [B, T] (0 = attended but not supervised, e.g. an <answer> question prompt)."""
         prefix = self._prefix(memory, control_ids)
         inp = target_ids
         if self.training and self.input_dropout > 0:
@@ -150,6 +151,8 @@ class Decoder(nn.Module):
         tgt = self.model.get_input_embeddings()(inp)
         ignore = torch.full(prefix.shape[:2], -100, dtype=torch.long, device=target_ids.device)
         labels = target_ids if target_mask is None else target_ids.masked_fill(target_mask == 0, -100)
+        if label_mask is not None:
+            labels = labels.masked_fill(label_mask == 0, -100)
         labels = torch.cat([ignore, labels], dim=1)
         attn = None
         if memory_mask is not None or target_mask is not None:
@@ -162,10 +165,14 @@ class Decoder(nn.Module):
             return self._run(torch.cat([prefix, tgt], dim=1), labels, attn).loss
 
     @torch.no_grad()
-    def generate(self, memory, control_ids, max_new_tokens: int, eos_id: int) -> list[int]:
-        """Greedy decode for a single example (batch 1)."""
+    def generate(self, memory, control_ids, max_new_tokens: int, eos_id: int,
+                 question_ids: torch.Tensor | None = None) -> list[int]:
+        """Greedy decode for a single example (batch 1). question_ids [1, Q] (the <answer> prompt)
+        follows the control token; like in `loss`, it is covered by the control vector."""
         x = self._prefix(memory, control_ids)
         emb = self.model.get_input_embeddings()
+        if question_ids is not None:
+            x = torch.cat([x, emb(question_ids.to(x.device))], dim=1)
         out: list[int] = []
         past = None
         flags = self._flag_ids(control_ids)

@@ -39,3 +39,23 @@ Nothing makes "concepts" appear by itself. With reconstruction loss alone, the m
 - **Density:** output length for each density token, and QA coverage per output token.
 - **Compression ratio:** input tokens ÷ memory vectors.
 - (Stage 4+) **Slot locality:** ablate slot i → drop on i-questions vs. others.
+
+## Stage 3: QA from memory
+
+Config: `configs/stage3.yaml`. Starts from the Stage 2 checkpoint, K = 16. Mix: 50% `<answer>` (SQuAD, paragraphs ≤ 4 chunks), 25% `<full>` replay (half 1-chunk WikiText, half whole XSum article), 25% `<terse>` XSum replay. Decoder LoRA at 3e-4, encoder side × 0.33, as in Stage 2.
+
+Every validation logs `answer_val_loss`, QA EM/F1 under real/shuffled/zeroed memory (`qa_*`), the `<full>` gap (zeroed − real `<full>` val loss) and density metrics on `val_gen_samples` examples. At the end the trainer writes `<run>/eval/stage3.{json,md}`: regression flags against the Stage 2 band (`engram.eval.report.STAGE2_GATES`) and memory F1 ÷ text-QA control F1, with a K=32 recommendation below 0.5. Training-time QA uses only a few examples. Use `eval.py --qa` (200 examples) for the headline ratio.
+
+How to run:
+
+```
+# 1. text-QA control (cached to runs/text_qa_control.json)
+uv run scripts/train_text_qa.py --config configs/text_qa.yaml
+# 2. Stage 3 (overnight)
+uv run scripts/train.py --config configs/stage3.yaml --init-from runs/20261125-163535/ckpt-600.pt
+# 3. final evals
+uv run scripts/eval.py --run runs/<stage3> --qa
+uv run scripts/eval.py --run runs/<stage3> --suite density
+```
+
+Results: _pending the overnight run._

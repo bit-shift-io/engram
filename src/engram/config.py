@@ -66,6 +66,23 @@ class Config:
     terse_val_samples: int = 0
     max_chunks: int = 4
     max_summary_tokens: int = 64
+    # Stage 3: fraction of all micro-batches that are <answer> (SQuAD); full_ratio splits the rest
+    answer_ratio: float = 0.0
+    qa_dataset: str = "rajpurkar/squad"
+    qa_train_samples: int = 0
+    qa_val_samples: int = 0
+    qa_eval_samples: int = 200  # held-out SQuAD dev subset for scripts/eval.py --qa
+    qa_eval_seed: int = 0  # seeds the shuffled-memory pairing
+    # Stage 3 validation: QA F1 (real/shuffled/zeroed) on the first N answer_val examples and density
+    # on the first N terse_val articles, generated at every val step; 0 = off (generation is slow)
+    val_gen_samples: int = 0
+    val_max_full_tokens: int = 0  # cap on <full> generation during val density; 0 = article length
+    # Text-QA control (scripts/train_text_qa.py): frozen base + one LoRA (lora_r, lr) trained on
+    # `paragraph\nQuestion: q\nAnswer:` -> answer. Optimizer steps, each grad_accum micro-batches of
+    # batch_size; set to Stage 3's answer_ratio * steps so both see the same number of QA examples.
+    text_qa_steps: int = 0
+    # cached control {em, f1}; scripts/eval.py --qa reports memory F1 / control F1 when it exists
+    text_qa_result: str = "runs/text_qa_control.json"
 
 
 def load_config(path: str | Path, overrides: dict[str, Any] | None = None) -> Config:

@@ -128,3 +128,86 @@ def test_stage2_trains_multi_chunk_full_batches_and_logs_their_val_loss(tmp_path
     assert sum(r["n_multi"] for r in steps) > 0 and sum(r["n_full"] for r in steps) == 0
     assert all(math.isfinite(r["train_loss"]) for r in steps)
     assert any("multi_val_loss" in r for r in rows)
+
+
+def test_stage3_trains_answer_full_terse_mix_from_stage2_shaped_checkpoint(tmp_path):
+    from engram.data.compression import make_example
+    from engram.data.qa import make_qa_example
+
+    tr, va = data()
+    tok = make_tiny_tokenizer()
+    terse = [make_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(5 + 6 * i)), "w1 w2",
+                          8, 4) for i in range(6)]
+    qa = [make_qa_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(4 + 7 * i)),
+                          f"w{40 + i} w50", f"w{i + 2}", 8, 4) for i in range(4)]
+    cfg1 = cfg_for(tmp_path, control_vectors=True, full_ratio=0.5, multi_full_ratio=0.5)
+    ck = train(build(cfg1), cfg1, tr, va, terse_train=terse) / "ckpt-5.pt"
+    saved = torch.load(ck)
+    for n in ("control.weight", "decoder.ctrl_vec.vec"):
+        saved["params"][n] = saved["params"][n][:2].clone()  # Stage 2 had <full>, <terse> only
+    torch.save(saved, ck)
+
+    cfg = cfg_for(tmp_path / "s3", init_from=str(ck), control_vectors=True, answer_ratio=0.5,
+                  full_ratio=0.5, multi_full_ratio=0.5, encoder_lr_scale=0.33, steps=8)
+    run = train(build(cfg), cfg, tr, va, terse_train=terse, terse_val=terse[:2],
+                answer_train=qa, answer_val=qa[:2])
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    steps = [r for r in rows if "train_loss" in r]
+    assert all(math.isfinite(r["train_loss"]) for r in steps)
+    assert sum(r["n_answer"] for r in steps) > 0
+    assert sum(r["n_terse"] + r["n_full"] + r["n_multi"] for r in steps) > 0
+    assert any(math.isfinite(r.get("answer_val_loss", math.nan)) for r in rows)
+
+
+STAGE2_LIKE = {"full_gap": 1.2, "terse_article_ratio": 0.10, "full_article_ratio": 0.90,
+               "terse_rouge_l": 0.19, "qa_real_f1": 0.30}
+
+
+def test_stage3_gates_pass_when_near_stage2_and_ratio_high():
+    from engram.eval.report import stage3_gates
+    g = stage3_gates(STAGE2_LIKE, control={"em": 0.4, "f1": 0.5})
+    assert g["regressions"] == [] and g["memory_over_control_f1"] == 0.6
+    assert g["recommend_k32"] is False
+
+
+def test_stage3_gates_flag_each_regression_and_recommend_k32_below_half():
+    from engram.eval.report import stage3_gates, stage3_markdown
+    row = {"full_gap": 0.6, "terse_article_ratio": 0.25, "full_article_ratio": 0.5,
+           "terse_rouge_l": 0.12, "qa_real_f1": 0.2}
+    g = stage3_gates(row, control={"em": 0.4, "f1": 0.5})
+    assert set(g["regressions"]) == {"full_gap", "terse_article_ratio", "full_article_ratio",
+                                     "terse_rouge_l"}
+    assert g["recommend_k32"] is True
+    md = stage3_markdown(g)
+    assert "K=32" in md and "full_gap" in md
+
+
+def test_stage3_gates_without_control_make_no_k32_call():
+    from engram.eval.report import stage3_gates
+    g = stage3_gates(STAGE2_LIKE, control=None)
+    assert g["memory_over_control_f1"] is None and g["recommend_k32"] is None
+
+
+def test_stage3_validation_logs_qa_f1_full_gap_density_and_writes_gates(tmp_path):
+    from engram.data.compression import make_example
+    from engram.data.qa import make_qa_example
+
+    tr, va = data()
+    tok = make_tiny_tokenizer()
+    terse = [make_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(5 + 6 * i)), "w1 w2",
+                          8, 4) for i in range(4)]
+    qa = [make_qa_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(4 + 7 * i)),
+                          f"w{40 + i} w50", f"w{i + 2}", 8, 4, answers=[f"w{i + 2}"])
+          for i in range(4)]
+    cfg = cfg_for(tmp_path, control_vectors=True, answer_ratio=0.5, full_ratio=0.5,
+                  multi_full_ratio=0.5, steps=2, val_interval=2, val_gen_samples=2,
+                  val_max_full_tokens=8)
+    run = train(build(cfg), cfg, tr, va, terse_train=terse, terse_val=terse[:3],
+                answer_train=qa, answer_val=qa[:3])
+    val = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()
+           if "val_loss" in l][-1]
+    for k in ("qa_real_f1", "qa_shuffled_f1", "qa_zeroed_f1", "full_gap",
+              "terse_article_ratio", "full_article_ratio", "terse_rouge_l", "length_ratio"):
+        assert math.isfinite(val[k]), k
+    gates = json.loads((run / "eval" / "stage3.json").read_text())
+    assert "regressions" in gates and (run / "eval" / "stage3.md").exists()

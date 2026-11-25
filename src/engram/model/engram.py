@@ -66,18 +66,24 @@ class Engram(nn.Module):
         b, m = len(examples), max(counts) * k
         memory = mem.new_zeros(b, m, mem.shape[-1])
         mmask = torch.zeros(b, m, dtype=torch.long, device=dev)
-        t = max(len(e["target"]) for e in examples)
+        # <answer> examples: decoder input [memory][<answer>][question][answer]; the question is
+        # attended (and flagged) but excluded from the loss.
+        seqs = [torch.cat([e["question"], e["target"]]) if "question" in e else e["target"]
+                for e in examples]
+        t = max(len(s) for s in seqs)
         target = torch.full((b, t), self.eos_id, dtype=torch.long, device=dev)
         tmask = torch.zeros(b, t, dtype=torch.long, device=dev)
+        lmask = torch.ones(b, t, dtype=torch.long, device=dev)
         start = 0
-        for i, (e, n) in enumerate(zip(examples, counts)):
+        for i, (e, s, n) in enumerate(zip(examples, seqs, counts)):
             memory[i, : n * k] = mem[start : start + n].reshape(n * k, -1)
             mmask[i, : n * k] = 1
             start += n
-            target[i, : len(e["target"])] = e["target"].to(dev)
-            tmask[i, : len(e["target"])] = 1
+            target[i, : len(s)] = s.to(dev)
+            tmask[i, : len(s)] = 1
+            lmask[i, : len(s) - len(e["target"])] = 0
         density = examples[0]["density"]
-        return self.decoder.loss(memory, self._control(density, b), target, mmask, tmask)
+        return self.decoder.loss(memory, self._control(density, b), target, mmask, tmask, lmask)
 
     def tokenize_chunks(self, text: str) -> torch.Tensor:
         """Token ids [1, N*chunk_size], right-padded with EOS to a whole number of chunks."""

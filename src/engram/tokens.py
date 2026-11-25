@@ -1,6 +1,6 @@
 """Control tokens for the decoder."""
 
-CONTROL_TOKENS = ["<full>", "<terse>"]
+CONTROL_TOKENS = ["<full>", "<terse>", "<answer>"]  # append only: ids must not shift
 
 
 def add_control_tokens(tokenizer, model) -> dict[str, int]:

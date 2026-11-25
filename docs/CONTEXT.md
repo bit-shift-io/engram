@@ -10,3 +10,7 @@
 - **Control token** — special token telling the decoder density or task.
 - **Compression ratio** — input tokens ÷ memory vectors.
 - **Memory ablation** — replacing memory with zeros or another input's memory to test whether the decoder uses it.
+- **Answer task** — `<answer>` control: memory + question → short answer. Stage 3.
+- **Text-QA control** — baseline reading the paragraph as plain text instead of memory, trained the same way. The denominator for the memory QA ratio.
+- **`<full>` gap** — mean `<full>` val loss with zeroed memory minus with real memory (nats). Stage 2 ≈ 1.0.
+- **Regression gate** — a Stage 3 metric (`<full>` gap, terse/full length ratios, `<terse>` ROUGE-L) checked against the Stage 2 band; outside it = regression. Written to `<run>/eval/stage3.md`.
