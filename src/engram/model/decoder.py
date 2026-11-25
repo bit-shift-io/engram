@@ -1,6 +1,7 @@
 """Decoder: [memory][control][target] -> teacher-forced loss, or greedy generation."""
 
 import contextlib
+import re
 
 import torch
 from torch import nn
@@ -50,11 +51,56 @@ class MemoryKVAdapter(nn.Module):
             self.n_mem = prev
 
 
+class ControlVectors(nn.Module):
+    """A learned vector per control flag (<full>, <terse>, ...) per decoder layer, added to that
+    layer's output (the residual stream) at every position from `start` on: control and target
+    positions, never memory. A prefix control token is one position the decoder can stop
+    attending to; this flag is present at every step and layer. Zero-init, so a no-op until
+    trained, and inactive (flags None) outside Decoder calls, so the encoder is untouched.
+    """
+
+    def __init__(self, model, control_token_ids: list[int]):
+        super().__init__()
+        self.layers = [m for n, m in model.named_modules() if re.search(r"(^|\.)layers\.\d+$", n)]
+        self.index = {t: i for i, t in enumerate(control_token_ids)}
+        d = model.config.hidden_size
+        self.vec = nn.Parameter(torch.zeros(len(control_token_ids), len(self.layers), d))
+        self.flags, self.start = None, 0
+        for i, m in enumerate(self.layers):
+            m.register_forward_hook(self._hook(i))
+
+    def flag_index(self, control_ids: torch.Tensor) -> torch.Tensor:
+        """[B] control token ids -> [B] flag indices."""
+        return torch.tensor([self.index[int(t)] for t in control_ids], device=control_ids.device)
+
+    def _hook(self, i: int):
+        def hook(module, args, out):
+            if self.flags is None:
+                return None
+            h = out[0] if isinstance(out, tuple) else out
+            v = self.vec[self.flags, i][:, None]
+            s = self.start
+            h = torch.cat([h[:, :s], h[:, s:] + v], dim=1)
+            return (h,) + tuple(out[1:]) if isinstance(out, tuple) else h
+        return hook
+
+    @contextlib.contextmanager
+    def active(self, flags, start: int):
+        prev = self.flags, self.start
+        self.flags, self.start = flags, start
+        try:
+            yield
+        finally:
+            self.flags, self.start = prev
+
+
 class Decoder(nn.Module):
     def __init__(self, model, control, use_lora: bool = True, input_dropout: float = 0.0,
-                 dropout_id: int = 0, memory_adapter_rank: int = 0):
+                 dropout_id: int = 0, memory_adapter_rank: int = 0,
+                 control_token_ids: list[int] | None = None):
         super().__init__()
         self.mem_adapter = MemoryKVAdapter(model, memory_adapter_rank) if memory_adapter_rank else None
+        self.ctrl_vec = ControlVectors(model, control_token_ids) if control_token_ids else None
         # Training only: replace this fraction of teacher-forced target *inputs* (labels kept) by
         # dropout_id, so the decoder can't reconstruct from context alone and must read memory.
         self.input_dropout, self.dropout_id = input_dropout, dropout_id
@@ -70,6 +116,15 @@ class Decoder(nn.Module):
 
     def _mem(self, n: int):
         return self.mem_adapter.memory(n) if self.mem_adapter is not None else contextlib.nullcontext()
+
+    def _flags(self, flags, start: int):
+        """Activate control vectors for flag indices [B], from sequence position `start` on."""
+        if self.ctrl_vec is None:
+            return contextlib.nullcontext()
+        return self.ctrl_vec.active(flags, start)
+
+    def _flag_ids(self, control_ids):
+        return None if self.ctrl_vec is None else self.ctrl_vec.flag_index(control_ids[:, 0])
 
     def _prefix(self, memory: torch.Tensor, control_ids: torch.Tensor) -> torch.Tensor:
         return torch.cat([memory, self.control(control_ids)], dim=1)
@@ -103,7 +158,7 @@ class Decoder(nn.Module):
             tm = target_mask if target_mask is not None else torch.ones_like(target_ids)
             ctrl = torch.ones(b, control_ids.shape[1], dtype=torch.long, device=dev)
             attn = torch.cat([mm.long(), ctrl, tm.long()], dim=1)
-        with self._mem(memory.shape[1]):
+        with self._mem(memory.shape[1]), self._flags(self._flag_ids(control_ids), memory.shape[1]):
             return self._run(torch.cat([prefix, tgt], dim=1), labels, attn).loss
 
     @torch.no_grad()
@@ -113,9 +168,11 @@ class Decoder(nn.Module):
         emb = self.model.get_input_embeddings()
         out: list[int] = []
         past = None
+        flags = self._flag_ids(control_ids)
         for _ in range(max_new_tokens):
             # Memory is only in the first (prefix) call; cached steps add new tokens only.
-            with self._ctx(), self._mem(memory.shape[1] if past is None else 0):
+            start = memory.shape[1] if past is None else 0
+            with self._ctx(), self._mem(start), self._flags(flags, start):
                 r = self.model(inputs_embeds=x, past_key_values=past, use_cache=True)
             past = r.past_key_values
             nxt = int(r.logits[0, -1].argmax())

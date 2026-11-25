@@ -1,4 +1,5 @@
-"""Density eval: <full> vs <terse> output length on one memory, <terse> ROUGE-L vs a TL;DR baseline."""
+"""Density eval: <full> vs <terse> output length on one memory, both also relative to the input
+article's length, and <terse> ROUGE-L vs a TL;DR baseline."""
 
 import json
 from pathlib import Path
@@ -22,7 +23,11 @@ def _mean(xs):
 
 def aggregate_density(records: list[dict]) -> dict:
     ratios = [r["terse_len"] / r["full_len"] for r in records if r["full_len"] > 0]
+    arts = [r for r in records if r.get("article_len", 0) > 0]
     return {
+        "mean_article_len": _mean([r["article_len"] for r in arts]),
+        "terse_article_ratio": _mean([r["terse_len"] / r["article_len"] for r in arts]),
+        "full_article_ratio": _mean([r["full_len"] / r["article_len"] for r in arts]),
         "n": len(records),
         "mean_full_len": _mean([r["full_len"] for r in records]),
         "mean_terse_len": _mean([r["terse_len"] for r in records]),
@@ -54,18 +59,22 @@ def evaluate_density(eng, examples: list[dict], max_full_tokens: int | None = No
         full = eng.decoder.generate(memory, eng._control("full", 1), n_full, eng.eos_id)
         terse = eng.decoder.generate(memory, eng._control("terse", 1), max_terse_tokens, eng.eos_id)
         ref = ex["target"].tolist()[:-1]
-        base = baseline_summary(eng, strip_trailing_eos(flat[0].tolist(), eng.eos_id), max_terse_tokens)
-        records.append({"full_len": len(full), "terse_len": len(terse),
+        article = strip_trailing_eos(flat[0].tolist(), eng.eos_id)
+        base = baseline_summary(eng, article, max_terse_tokens)
+        records.append({"full_len": len(full), "terse_len": len(terse), "article_len": len(article),
                         "terse_rouge_l": rouge_l(terse, ref), "baseline_rouge_l": rouge_l(base, ref)})
     return {"k": k, "compression_ratio": eng.cfg.chunk_size / k, **aggregate_density(records)}
 
 
 def density_markdown(results: list[dict]) -> str:
-    rows = ["| K | n | mean <full> len | mean <terse> len | terse/full ratio | <terse> ROUGE-L | base TL;DR ROUGE-L |",
-            "|---|---|---|---|---|---|---|"]
+    rows = ["| K | n | mean article len | mean <full> len | mean <terse> len | terse/full ratio | "
+            "terse/article ratio | full/article ratio | <terse> ROUGE-L | base TL;DR ROUGE-L |",
+            "|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
-        rows.append(f"| {r['k']} | {r['n']} | {r['mean_full_len']:.1f} | {r['mean_terse_len']:.1f} | "
-                    f"{r['length_ratio']:.3f} | {r['terse_rouge_l']:.3f} | {r['baseline_rouge_l']:.3f} |")
+        rows.append(f"| {r['k']} | {r['n']} | {r.get('mean_article_len', 0):.1f} | {r['mean_full_len']:.1f} | "
+                    f"{r['mean_terse_len']:.1f} | {r['length_ratio']:.3f} | "
+                    f"{r.get('terse_article_ratio', 0):.3f} | {r.get('full_article_ratio', 0):.3f} | "
+                    f"{r['terse_rouge_l']:.3f} | {r['baseline_rouge_l']:.3f} |")
     return "\n".join(rows)
 
 

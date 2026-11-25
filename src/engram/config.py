@@ -30,6 +30,9 @@ class Config:
     # >0: low-rank k/v deltas applied at memory positions only in every decoder layer (reads
     # memory better, can't memorise targets). 0 = off.
     decoder_memory_adapter_rank: int = 0
+    # True: a learned vector per control flag added to every decoder layer's residual stream at
+    # control + target positions, so the density flag is present at every step (not one token).
+    control_vectors: bool = False
     # subtract a running per-slot mean from encoder hidden states before projecting to memory
     center_memory: bool = False
     # memory slot i += RMS-scaled mean input embedding of chunk tokens [i*C/K, (i+1)*C/K)
@@ -57,6 +60,7 @@ class Config:
     init_from: str = ""  # checkpoint .pt to load params from (fresh optimizer and step)
     encoder_lr_scale: float = 1.0  # LR multiplier for encoder LoRA + memory queries + projection
     full_ratio: float = 1.0  # fraction of micro-batches that are <full> reconstruction
+    multi_full_ratio: float = 0.0  # fraction of <full> micro-batches that rebuild a whole multi-chunk article
     terse_dataset: str = "EdinburghNLP/xsum"
     terse_train_samples: int = 0
     terse_val_samples: int = 0

@@ -98,3 +98,18 @@ init from runs/20261125-090655/ckpt-3000.pt; decoder LoRA lr 3e-4, encoder side 
 terse_val_loss 3.08 -> 2.88. Density (32 XSum): full len 25.7, terse len 26.5, ratio 4.37 (target <=0.25 FAILS),
 terse ROUGE-L 0.195 vs base TL;DR 0.108. Ratio fails because <full> stops after ~26 tokens on 4-chunk (64-vector)
 memory — <full> was only ever trained on 1-chunk (16-vector) memory, so the comparison length is broken, not terse.
+
+## Stage 2 + multi-chunk <full> — runs/20261125-142812 (2026-11-25)
+init from runs/20261125-123127/ckpt-500.pt, multi_full_ratio 0.5 (25% 1-chunk full / 25% article full / 50% terse), 400 steps, 15.5 s/step.
+<full> held-out real/shuffled: s100 2.003/3.160 · s400 1.989/3.163 (gap 1.17, acc 0.527 vs 0.454). multi_val_loss 2.75 -> 2.66; terse_val 2.86 -> 2.82.
+Density: full len 34.7, terse 25.8, ratio 1.09 (target <=0.25 FAILS); terse ROUGE-L 0.192 vs base 0.108.
+Inspection: on XSum articles <full> writes a one-sentence news-style summary and stops (13-34 tokens) — it follows the
+input's genre (articles always meant summary for 500 steps) over the <full> control token. On WikiText chunks <full>
+writes the full 128 tokens, on-topic but paraphrased/repetitive: memory holds gist, not verbatim text.
+
+## Stage 2 + control vectors — runs/20261125-163535 (2026-11-25)
+init from Stage 1 ckpt-3000; control_vectors on; mix 20% 1-chunk full / 40% article full / 40% terse; 600 steps, 19 s/step.
+<full> held-out real/shuffled: s100 2.147/2.972 · s300 2.039/3.130 · s600 2.017/3.117 (gap 1.10, acc 0.521 vs 0.449). Gap target met.
+val s600: full 2.239, multi (article full) 2.530 (prev run 2.657), terse 2.849.
+Density (32 XSum): article 321.8, full 266.1 (was 34.7), terse 22.4. terse/full 0.297 (target <=0.25: close miss),
+terse/article 0.100, full/article 0.908. terse ROUGE-L 0.184 vs base 0.108. Control vectors fixed <full> stopping early.

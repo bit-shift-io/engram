@@ -14,6 +14,7 @@ import torch
 import yaml
 
 from engram.config import Config
+from engram.data.compression import full_example
 from engram.data.mixed import MixedSampler
 from engram.train.losses import reconstruction_loss, validation_loss
 
@@ -70,6 +71,7 @@ def load_checkpoint(eng, path, opt=None) -> int:
 
 
 def _batch_loss(eng, density: str, batch) -> torch.Tensor:
+    # "multi" (multi-chunk <full>) and "terse" batches are lists of examples with their own density.
     return reconstruction_loss(eng, batch) if density == "full" else eng.terse_loss(batch)
 
 
@@ -91,7 +93,11 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
             load_checkpoint(eng, cfg.init_from)  # params only: fresh optimizer and step
         start = 0
     gen = torch.Generator().manual_seed(cfg.seed + start)
-    sampler = MixedSampler(train_chunks, terse_train, cfg.full_ratio, cfg.batch_size, gen)
+    multi = None
+    if cfg.multi_full_ratio > 0:
+        multi = [full_example(e, eng.eos_id) for e in terse_train]
+    sampler = MixedSampler(train_chunks, terse_train, cfg.full_ratio, cfg.batch_size, gen,
+                           multi_full=multi, multi_ratio=cfg.multi_full_ratio)
     eng.train()
     metrics = open(run_dir / "metrics.jsonl", "a")
 
@@ -104,7 +110,7 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
         for g in opt.param_groups:
             g["lr"] = lr_at(step, cfg) * g["scale"]
         opt.zero_grad()
-        total, counts = 0.0, {"full": 0, "terse": 0}
+        total, counts = 0.0, {"full": 0, "multi": 0, "terse": 0}
         for _ in range(cfg.grad_accum):
             density, batch = sampler.next()
             counts[density] += 1
@@ -118,11 +124,14 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
         if len(opt.param_groups) > 1:
             extra = {"encoder_lr": opt.param_groups[0]["lr"]}
         log(step=n, train_loss=total, lr=opt.param_groups[-1]["lr"], grad_norm=gnorm,
-            n_full=counts["full"], n_terse=counts["terse"], secs=time.time() - t0, **extra)
+            n_full=counts["full"], n_multi=counts["multi"], n_terse=counts["terse"], secs=time.time() - t0, **extra)
         if n % cfg.val_interval == 0 or n == cfg.steps:
             row = {"val_loss": validation_loss(eng, val_chunks, cfg.batch_size)}
             if terse_val:
                 row["terse_val_loss"] = _terse_val_loss(eng, terse_val, cfg.batch_size)
+                if multi:
+                    full_val = [full_example(e, eng.eos_id) for e in terse_val]
+                    row["multi_val_loss"] = _terse_val_loss(eng, full_val, cfg.batch_size)
             log(step=n, **row)
         if n % cfg.ckpt_interval == 0 or n == cfg.steps:
             save_checkpoint(eng, opt, n, run_dir / f"ckpt-{n}.pt")

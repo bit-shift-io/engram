@@ -45,3 +45,47 @@ def test_terse_loss_with_variable_chunk_counts_ignores_memory_padding(tiny_engra
         la, lb = float(eng.terse_loss([a])), float(eng.terse_loss([b]))
         both = float(eng.terse_loss([a, b]))
     assert abs(both - (la + lb) / 2) < 1e-4
+
+
+def test_full_example_reconstructs_the_article_without_padding():
+    from engram.data.compression import full_example
+
+    tok = make_tiny_tokenizer()
+    eos = tok.eos_token_id
+    ex = make_example(tok, " ".join(f"w{i}" for i in range(20)), "w1", chunk_size=8, max_chunks=4)
+    fx = full_example(ex, eos)
+    assert fx["density"] == "full"
+    assert torch.equal(fx["chunks"], ex["chunks"])  # same multi-chunk memory input
+    assert fx["target"].tolist() == tok(" ".join(f"w{i}" for i in range(20))).input_ids + [eos]
+
+
+def test_single_chunk_full_example_matches_plain_reconstruction_loss(tiny_engram):
+    from engram.data.compression import full_example
+
+    eng = tiny_engram(chunk_size=8, k=4).eval()
+    tok = eng.tokenizer
+    ex = make_example(tok, " ".join(f"w{i}" for i in range(8)), "w1", 8, 4)  # exactly one chunk
+    with torch.no_grad():
+        multi = float(eng.terse_loss([full_example(ex, eng.eos_id)]))
+        plain = float(eng.loss(ex["chunks"]))
+    assert abs(multi - plain) < 1e-4
+
+
+def test_mixed_sampler_draws_multi_chunk_full_batches():
+    from engram.data.compression import full_example
+    from engram.data.mixed import MixedSampler
+
+    tok = make_tiny_tokenizer()
+    full = torch.randint(2, 64, (20, 8))
+    terse = [make_example(tok, "w1 w2", "w3", 8, 4) for _ in range(10)]
+    multi = [full_example(e, tok.eos_token_id) for e in terse]
+    s = MixedSampler(full, terse, full_ratio=0.5, batch_size=3,
+                     generator=torch.Generator().manual_seed(0), multi_full=multi, multi_ratio=0.5)
+    kinds = [s.next() for _ in range(2000)]
+    names = [k for k, _ in kinds]
+    for k, b in kinds:
+        if k == "multi":
+            assert len(b) == 3 and all(e["density"] == "full" for e in b)
+    assert abs(names.count("terse") / 2000 - 0.5) < 0.04
+    assert abs(names.count("multi") / 2000 - 0.25) < 0.04
+    assert abs(names.count("full") / 2000 - 0.25) < 0.04

@@ -31,7 +31,9 @@ class Engram(nn.Module):
                                pooled_residual=cfg.memory_pooled_residual)
         self.decoder = Decoder(self.lm, self.control, use_lora=cfg.decoder_lora,
                                input_dropout=cfg.decoder_input_dropout, dropout_id=self.eos_id,
-                               memory_adapter_rank=cfg.decoder_memory_adapter_rank)
+                               memory_adapter_rank=cfg.decoder_memory_adapter_rank,
+                               control_token_ids=(list(self.control_ids.values())
+                                                  if cfg.control_vectors else None))
         self.to(cfg.device)
 
     def trainable_parameters(self):
@@ -54,7 +56,8 @@ class Engram(nn.Module):
         return self.decoder.loss(memory, self._control(density, b), target)
 
     def terse_loss(self, examples: list[dict]) -> torch.Tensor:
-        """Summary loss over examples {chunks [n_i, C], target [T_i], density}; memory and
+        """Loss over multi-chunk examples {chunks [n_i, C], target [T_i], density} (<terse>
+        summaries or <full> article reconstruction); memory and
         targets are right-padded and masked so variable chunk counts batch together."""
         dev, k = self.cfg.device, self.cfg.k
         counts = [len(e["chunks"]) for e in examples]

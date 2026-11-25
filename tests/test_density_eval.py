@@ -25,3 +25,12 @@ def test_aggregate_skips_zero_length_full_in_ratio():
 def test_strip_trailing_eos():
     assert strip_trailing_eos([1, 2, 9, 9], 9) == [1, 2]
     assert strip_trailing_eos([9, 9], 9) == []
+
+
+def test_aggregate_terse_vs_article_length_ratio():
+    a, b = rec(100, 20, 0, 0), rec(50, 25, 0, 0)
+    a["article_len"], b["article_len"] = 400, 100
+    out = aggregate_density([a, b])
+    assert out["mean_article_len"] == 250
+    assert out["terse_article_ratio"] == pytest.approx((20 / 400 + 25 / 100) / 2)
+    assert out["full_article_ratio"] == pytest.approx((100 / 400 + 50 / 100) / 2)

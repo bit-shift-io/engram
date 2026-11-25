@@ -1,4 +1,5 @@
 import json
+import math
 from dataclasses import replace
 
 import torch
@@ -112,3 +113,18 @@ def test_frozen_decoder_trainer_step_updates_encoder_side_only(tmp_path):
     assert any(n.startswith("encoder.queries") for n in changed)
     assert any(n.startswith("encoder.proj") for n in changed)
     assert all(p.requires_grad for n, p in named.items() if "lora_" in n)
+
+def test_stage2_trains_multi_chunk_full_batches_and_logs_their_val_loss(tmp_path):
+    from engram.data.compression import make_example
+
+    tr, va = data()
+    tok = make_tiny_tokenizer()
+    terse = [make_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(5 + 6 * i)), "w1 w2",
+                          8, 4) for i in range(6)]
+    cfg = cfg_for(tmp_path, full_ratio=0.5, multi_full_ratio=1.0, steps=8)
+    run = train(build(cfg), cfg, tr, va, terse_train=terse, terse_val=terse[:2])
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    steps = [r for r in rows if "train_loss" in r]
+    assert sum(r["n_multi"] for r in steps) > 0 and sum(r["n_full"] for r in steps) == 0
+    assert all(math.isfinite(r["train_loss"]) for r in steps)
+    assert any("multi_val_loss" in r for r in rows)

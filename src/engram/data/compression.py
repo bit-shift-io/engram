@@ -25,6 +25,15 @@ def make_example(tokenizer, article: str, summary: str, chunk_size: int, max_chu
     }
 
 
+def full_example(example: dict, eos_id: int) -> dict:
+    """Multi-chunk <full> example from an article example: same chunks as memory, target = the
+    article tokens (EOS padding stripped) + EOS. Trains <full> on memory larger than one chunk."""
+    ids = example["chunks"].flatten().tolist()
+    while ids and ids[-1] == eos_id:
+        ids.pop()
+    return {"chunks": example["chunks"], "target": torch.tensor(ids + [eos_id]), "density": "full"}
+
+
 def load_terse_examples(cfg: Config, tokenizer, split: str, n: int) -> list[dict]:
     """n XSum examples for a split, cached under cfg.data_cache."""
     key = (f"{cfg.terse_dataset}-{split}-{cfg.model_name}-{cfg.chunk_size}-{cfg.max_chunks}"
