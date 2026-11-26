@@ -45,6 +45,12 @@ class Config:
     memory_pooled_residual: bool = False
     # fraction of decoder teacher-forcing inputs replaced by EOS in training (word dropout)
     decoder_input_dropout: float = 0.0
+    # True: <full> reconstruction loss weights each target token by the decoder's own loss on it
+    # with zeroed memory (normalised to mean 1 per chunk, clipped at fact_weight_cap)
+    fact_weighting: bool = False
+    fact_weight_cap: float = 5.0
+    # fraction of <full> chunk batches trained as the cloze task (engram.data.cloze) instead
+    cloze_ratio: float = 0.0
     # training
     lr: float = 2e-3
     steps: int = 800  # optimizer steps

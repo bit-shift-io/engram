@@ -55,7 +55,7 @@ class Engram(nn.Module):
         target = torch.cat([chunk_ids, eos], dim=1)
         return self.decoder.loss(memory, self._control(density, b), target)
 
-    def terse_loss(self, examples: list[dict]) -> torch.Tensor:
+    def terse_loss(self, examples: list[dict], memory_transform=None) -> torch.Tensor:
         """Loss over multi-chunk examples {chunks [n_i, C], target [T_i], density} (<terse>
         summaries or <full> article reconstruction); memory and
         targets are right-padded and masked so variable chunk counts batch together."""
@@ -82,6 +82,8 @@ class Engram(nn.Module):
             target[i, : len(s)] = s.to(dev)
             tmask[i, : len(s)] = 1
             lmask[i, : len(s) - len(e["target"])] = 0
+        if memory_transform is not None:  # memory-necessity eval: shuffled / zeroed memory
+            memory = memory_transform(memory)
         density = examples[0]["density"]
         return self.decoder.loss(memory, self._control(density, b), target, mmask, tmask, lmask)
 

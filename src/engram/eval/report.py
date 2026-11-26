@@ -127,3 +127,52 @@ def stage3b_final_markdown(s: dict) -> str:
     rows += ["", f"text-QA control F1: {ctrl} (QA n={s['qa_n']})",
              f"answer recall: {s['answer_recall']:.3f}", "", stage3_markdown(s)]
     return "\n".join(rows)
+
+
+# ---- fact-objective pipeline (scripts/fact_objective.py) ----------------------------------------
+
+FACT_RECALL_PASS = 0.15
+# Measured earlier; hardcoded. ROUGE-L tuples are (real, shuffled, zeroed).
+FACT_BASELINES = {
+    # runs/20261125-090655 (K=16 Stage 1); answer recall not measured for this run
+    "K=16 Stage 1": {"answer_recall": None, "recon_token_f1": None,
+                     "wikitext": (0.226, 0.164, 0.051), "squad": (0.141, 0.103, 0.037)},
+    # runs/k32_wikionly/20261126-164326 (K=32 WikiText-only)
+    "K=32 WikiText-only": {"answer_recall": 0.050, "recon_token_f1": 0.195,
+                           "wikitext": (0.163, 0.136, 0.001), "squad": (0.109, 0.077, 0.000)},
+}
+FACT_STAGE2_RECALL = 0.075  # K=16 Stage 2 (runs/20261125-163535/eval/recall.json, n=40)
+
+
+def fact_arm(k: int, run: str, ev: dict) -> dict:
+    """ev: {recall: evaluate_recall result, wikitext/squad: evaluate_reconstruction results}.
+    Pass = answer_recall >= 0.15 and real ROUGE-L > shuffled ROUGE-L on WikiText val."""
+    rc = ev["recall"]["answer_recall"]
+    real, shuf = ev["wikitext"]["real"]["rouge_l"], ev["wikitext"]["shuffled"]["rouge_l"]
+    reasons = []
+    if rc < FACT_RECALL_PASS:
+        reasons.append(f"answer recall {rc:.3f} < {FACT_RECALL_PASS}")
+    if not real > shuf:
+        reasons.append(f"WikiText ROUGE-L real {real:.3f} <= shuffled {shuf:.3f}")
+    rouge = {s: tuple(ev[s][c]["rouge_l"] for c in ("real", "shuffled", "zeroed")) for s in ("wikitext", "squad")}
+    return {"k": k, "run": run, "answer_recall": rc, "recon_token_f1": ev["recall"]["recon_token_f1"],
+            **rouge, "passed": not reasons, "reason": "; ".join(reasons)}
+
+
+def fact_summary_markdown(arms: list[dict]) -> str:
+    rows = ["# Fact objective summary", "",
+            f"Pass: answer recall >= {FACT_RECALL_PASS} and WikiText real ROUGE-L > shuffled.", "",
+            "| run | answer recall | recon F1 | WikiText ROUGE-L real/shuf/zero | SQuAD ROUGE-L real/shuf/zero | pass |",
+            "|---|---|---|---|---|---|"]
+    f = lambda v: "n/a" if v is None else f"{v:.3f}"  # noqa: E731
+    t = lambda r: " / ".join(f"{v:.3f}" for v in r)  # noqa: E731
+    for name, b in FACT_BASELINES.items():
+        rows.append(f"| {name} (baseline) | {f(b['answer_recall'])} | {f(b['recon_token_f1'])} | "
+                    f"{t(b['wikitext'])} | {t(b['squad'])} | - |")
+    for a in arms:
+        status = "PASS" if a["passed"] else f"FAIL ({a['reason']})"
+        rows.append(f"| fact K={a['k']} ({a['run']}) | {f(a['answer_recall'])} | {f(a['recon_token_f1'])} | "
+                    f"{t(a['wikitext'])} | {t(a['squad'])} | {status} |")
+    rows += ["", f"K=16 Stage 2 answer recall (reference): {FACT_STAGE2_RECALL:.3f}. "
+             "Baselines: runs/20261125-090655 (K=16 Stage 1), runs/k32_wikionly/20261126-164326 (K=32)."]
+    return "\n".join(rows)

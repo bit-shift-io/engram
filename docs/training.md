@@ -91,3 +91,19 @@ HF_HOME=$PWD/.hf HF_HUB_OFFLINE=1 nohup uv run scripts/stage3b.py > runs/stage3b
 # smoke (tiny steps, runs_smoke_k32/stage3b; --gate-threshold 0 so the untrained gate passes)
 HF_HOME=$PWD/.hf HF_HUB_OFFLINE=1 uv run scripts/stage3b.py --smoke --gate-threshold 0
 ```
+
+## Fact objective: fact weighting + cloze task (unattended pipeline)
+
+Stage 1 settings (WikiText only, 2000 train chunks, lr 0.002, batch 4, frozen decoder, memory adapter rank 8) with two objective changes: fact-weighted `<full>` loss (`fact_weighting: true`, weights from the frozen decoder under zeroed memory) and the cloze task (`cloze_ratio: 0.3`).
+
+`scripts/fact_objective.py` runs: K=16 train (`configs/fact_k16.yaml`, 3000 steps) → eval (answer recall on 40 SQuAD dev paragraphs; ROUGE-L real/shuffled/zeroed on 15 WikiText val chunks and 15 SQuAD dev paragraph chunks) → pass? stop : K=32 train (`configs/fact_k32.yaml`, 4000 steps) → same eval → summary. Pass = answer recall ≥ 0.15 and WikiText real ROUGE-L > shuffled (`engram.eval.report.fact_arm`). The summary compares each arm with K=16 Stage 1 and K=32 WikiText-only baselines.
+
+Everything goes under `runs/fact_objective/`: derived configs, `k16/<ts>`, `k32/<ts>` (eval in `<run>/eval/fact_eval.json`), `summary.{json,md}` and `state.json`. Re-running the same command resumes from finished stages / the latest checkpoint.
+
+How to run:
+
+```
+HF_HOME=$PWD/.hf HF_HUB_OFFLINE=1 nohup .venv/bin/python scripts/fact_objective.py > runs/fact_objective.log 2>&1 &
+# smoke (tiny steps, runs_smoke_fact/; --force-fail so both arms run)
+HF_HOME=$PWD/.hf HF_HUB_OFFLINE=1 .venv/bin/python scripts/fact_objective.py --smoke --force-fail
+```

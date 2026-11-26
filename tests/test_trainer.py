@@ -291,3 +291,17 @@ def test_joint_stage_trains_squad_full_and_gates_include_squad_metrics(tmp_path)
     gates = json.loads((run / "eval" / "stage3.json").read_text())
     assert gates["metrics"]["squad_full_length_ratio"] is not None
     assert gates["metrics"]["answer_recall"] is not None
+
+
+def test_fact_weighting_trains_with_finite_loss(tmp_path):
+    from engram.train.trainer import fact_weighted_loss
+    cfg = cfg_for(tmp_path, fact_weighting=True, decoder_lora=False, decoder_memory_adapter_rank=2)
+    eng = build(cfg)
+    train_chunks, val_chunks = data()
+    loss = fact_weighted_loss(eng, train_chunks[:2])
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in eng.decoder.mem_adapter.B)
+    run = train(eng, cfg, train_chunks, val_chunks)
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    assert all(math.isfinite(r["train_loss"]) for r in rows if "train_loss" in r)

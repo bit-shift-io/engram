@@ -17,10 +17,13 @@ import yaml
 from engram.config import Config
 from engram.data.compression import full_example
 from engram.data.mixed import MixedSampler
+from engram.data.cloze import ClozeSampler, make_cloze_example
+from engram.eval.ablation import CONDITIONS, zero_memory
 from engram.eval.density import evaluate_density
 from engram.eval.qa import evaluate_qa
 from engram.eval.recall import evaluate_recall
 from engram.eval.report import load_control_result, stage3_gates, stage3_markdown
+from engram.model.decoder import fact_weights
 from engram.train.losses import reconstruction_loss, validation_loss
 
 
@@ -88,7 +91,41 @@ def load_checkpoint(eng, path, opt=None) -> int:
 
 def _batch_loss(eng, density: str, batch) -> torch.Tensor:
     # "multi" (multi-chunk <full>), "terse" and "answer" batches are lists of examples with their own density.
-    return reconstruction_loss(eng, batch) if density == "full" else eng.terse_loss(batch)
+    if density == "cloze":
+        return eng.terse_loss(cloze_examples(eng, batch))
+    if density != "full":
+        return eng.terse_loss(batch)
+    return fact_weighted_loss(eng, batch) if eng.cfg.fact_weighting else reconstruction_loss(eng, batch)
+
+
+def cloze_examples(eng, chunk_ids: torch.Tensor, fallback: bool = True) -> list[dict]:
+    """Cloze examples for a [B, C] chunk batch; chunks without fact spans become <full>
+    reconstruction examples (fallback) or are dropped. Budget: 2 * (chunk_size + 1) tokens."""
+    out = []
+    for c in chunk_ids:
+        ex = make_cloze_example(eng.tokenizer, c, 2 * (eng.cfg.chunk_size + 1))
+        if ex is None and fallback:
+            ex = {"chunks": c.reshape(1, -1), "density": "full",
+                  "target": torch.cat([c, torch.tensor([eng.eos_id], dtype=c.dtype)])}
+        if ex is not None:
+            out.append(ex)
+    return out
+
+
+def fact_weighted_loss(eng, chunk_ids: torch.Tensor) -> torch.Tensor:
+    """<full> reconstruction loss with each target token weighted by the decoder's loss on it
+    under zeroed memory (the memory-necessity eval's zero transform), so tokens the decoder
+    already predicts without memory count less (see `fact_weights`)."""
+    chunk_ids = chunk_ids.to(eng.cfg.device)
+    b = chunk_ids.shape[0]
+    memory = eng.encode(chunk_ids)
+    eos = torch.full((b, 1), eng.eos_id, dtype=torch.long, device=chunk_ids.device)
+    target = torch.cat([chunk_ids, eos], dim=1)
+    ctrl = eng._control("full", b)
+    with torch.no_grad():
+        ref = eng.decoder.token_losses(zero_memory(memory), ctrl, target)
+    w = fact_weights(ref, torch.ones_like(target), eng.cfg.fact_weight_cap)
+    return eng.decoder.loss(memory, ctrl, target, weights=w)
 
 
 def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor,
@@ -120,6 +157,10 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
                            multi_full=multi, multi_ratio=cfg.multi_full_ratio,
                            answer=answer_train, answer_ratio=cfg.answer_ratio,
                            squad_full=squad_full, squad_ratio=cfg.squad_full_ratio)
+    sampler = ClozeSampler(sampler, cfg.cloze_ratio, gen)
+    cloze_val = cloze_examples(eng, val_chunks, fallback=False) if cfg.cloze_ratio > 0 else []
+    if len(cloze_val) % cfg.batch_size == 1:  # a last batch of 1 cannot be shuffled
+        cloze_val = cloze_val[:-1]
     eng.train()
     metrics = open(run_dir / "metrics.jsonl", "a")
 
@@ -133,7 +174,7 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
         for g in opt.param_groups:
             g["lr"] = lr_at(step, cfg) * g["scale"]
         opt.zero_grad()
-        total, counts = 0.0, {"full": 0, "multi": 0, "squad_full": 0, "terse": 0, "answer": 0}
+        total, counts = 0.0, {"full": 0, "multi": 0, "squad_full": 0, "terse": 0, "answer": 0, "cloze": 0}
         for _ in range(cfg.grad_accum):
             density, batch = sampler.next()
             counts[density] += 1
@@ -146,6 +187,8 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
         extra = {}
         if len(opt.param_groups) > 1:
             extra = {"encoder_lr": opt.param_groups[0]["lr"]}
+        if cfg.cloze_ratio > 0:
+            extra["n_cloze"] = counts["cloze"]
         log(step=n, train_loss=total, lr=opt.param_groups[-1]["lr"], grad_norm=gnorm,
             n_full=counts["full"], n_multi=counts["multi"], n_squad_full=counts["squad_full"], n_terse=counts["terse"],
             n_answer=counts["answer"], secs=time.time() - t0, **extra)
@@ -156,6 +199,9 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
                 if multi:
                     full_val = [full_example(e, eng.eos_id) for e in terse_val]
                     row["multi_val_loss"] = _terse_val_loss(eng, full_val, cfg.batch_size)
+            if len(cloze_val) >= 2:  # shuffled memory needs another example's memory
+                for c, f in CONDITIONS.items():
+                    row[f"cloze_val_loss_{c}"] = _terse_val_loss(eng, cloze_val, cfg.batch_size, f)
             if answer_val:
                 row["answer_val_loss"] = _terse_val_loss(eng, answer_val, cfg.batch_size)
             if cfg.val_gen_samples and answer_val:
@@ -229,11 +275,11 @@ def _generation_val(eng, cfg: Config, val_chunks, terse_val, answer_val) -> dict
 
 
 @torch.no_grad()
-def _terse_val_loss(eng, examples: list[dict], batch_size: int) -> float:
+def _terse_val_loss(eng, examples: list[dict], batch_size: int, memory_transform=None) -> float:
     eng.eval()
     total = 0.0
     for i in range(0, len(examples), batch_size):
         b = examples[i : i + batch_size]
-        total += float(eng.terse_loss(b)) * len(b)
+        total += float(eng.terse_loss(b, memory_transform)) * len(b)
     eng.train()
     return total / len(examples)

@@ -94,6 +94,25 @@ class ControlVectors(nn.Module):
             self.flags, self.start = prev
 
 
+def fact_weights(token_losses: torch.Tensor, mask: torch.Tensor, cap: float) -> torch.Tensor:
+    """Per-token weights [B, T] from reference losses: detached, mean 1 per row over mask=1
+    tokens, clipped at `cap`, renormalised to mean 1; 0 where mask is 0. Clip+renormalise is
+    repeated so the result stays <= cap (renormalising lifts clipped tokens above it)."""
+    m = mask.float()
+    w = token_losses.detach().float() * m
+    w = torch.where(w.sum(1, keepdim=True) > 0, w, m)  # all-zero row -> uniform
+    n = m.sum(1, keepdim=True).clamp(min=1)
+    w = w / (w.sum(1, keepdim=True) / n).clamp(min=1e-8)
+    for _ in range(w.shape[1]):  # each pass clips >= 1 more token per row, or stops
+        if w.max() <= cap + 1e-6:
+            break
+        clipped = w >= cap
+        free = (w * ~clipped).sum(1, keepdim=True)
+        budget = n - cap * clipped.sum(1, keepdim=True)  # mass left for unclipped tokens
+        w = torch.where(clipped, cap * m, w * budget / free.clamp(min=1e-8))
+    return w
+
+
 class Decoder(nn.Module):
     def __init__(self, model, control, use_lora: bool = True, input_dropout: float = 0.0,
                  dropout_id: int = 0, memory_adapter_rank: int = 0,
@@ -140,9 +159,39 @@ class Decoder(nn.Module):
                               position_ids=pos)
 
     def loss(self, memory, control_ids, target_ids, memory_mask=None,
-             target_mask=None, label_mask=None) -> torch.Tensor:
+             target_mask=None, label_mask=None, weights=None) -> torch.Tensor:
         """memory_mask [B, M] / target_mask [B, T] (1 = real) allow right-padded batches.
-        label_mask [B, T] (0 = attended but not supervised, e.g. an <answer> question prompt)."""
+        label_mask [B, T] (0 = attended but not supervised, e.g. an <answer> question prompt).
+        weights [B, T] (optional): per-target-token loss weights; mean over supervised tokens."""
+        if weights is not None:
+            tl = self.token_losses(memory, control_ids, target_ids, memory_mask, target_mask,
+                                   label_mask)
+            sup = self._labels(target_ids, target_mask, label_mask) != -100
+            return (tl * weights).sum() / sup.sum().clamp(min=1)
+        return self._forward(memory, control_ids, target_ids, memory_mask, target_mask,
+                             label_mask, use_labels=True).loss
+
+    def token_losses(self, memory, control_ids, target_ids, memory_mask=None,
+                     target_mask=None, label_mask=None) -> torch.Tensor:
+        """Per-target-token cross-entropy [B, T]; 0 where the token is not supervised."""
+        logits = self._forward(memory, control_ids, target_ids, memory_mask, target_mask,
+                               label_mask, use_labels=False).logits
+        n_pre, t = memory.shape[1] + control_ids.shape[1], target_ids.shape[1]
+        pred = logits[:, n_pre - 1 : n_pre - 1 + t].float()
+        labels = self._labels(target_ids, target_mask, label_mask)
+        ce = nn.functional.cross_entropy(pred.reshape(-1, pred.shape[-1]), labels.reshape(-1),
+                                         ignore_index=-100, reduction="none")
+        return ce.reshape(labels.shape)
+
+    @staticmethod
+    def _labels(target_ids, target_mask, label_mask):
+        labels = target_ids if target_mask is None else target_ids.masked_fill(target_mask == 0, -100)
+        if label_mask is not None:
+            labels = labels.masked_fill(label_mask == 0, -100)
+        return labels
+
+    def _forward(self, memory, control_ids, target_ids, memory_mask, target_mask, label_mask,
+                 use_labels: bool):
         prefix = self._prefix(memory, control_ids)
         inp = target_ids
         if self.training and self.input_dropout > 0:
@@ -150,10 +199,7 @@ class Decoder(nn.Module):
             inp = target_ids.masked_fill(drop, self.dropout_id)
         tgt = self.model.get_input_embeddings()(inp)
         ignore = torch.full(prefix.shape[:2], -100, dtype=torch.long, device=target_ids.device)
-        labels = target_ids if target_mask is None else target_ids.masked_fill(target_mask == 0, -100)
-        if label_mask is not None:
-            labels = labels.masked_fill(label_mask == 0, -100)
-        labels = torch.cat([ignore, labels], dim=1)
+        labels = torch.cat([ignore, self._labels(target_ids, target_mask, label_mask)], dim=1)
         attn = None
         if memory_mask is not None or target_mask is not None:
             b, dev = target_ids.shape[0], target_ids.device
@@ -162,7 +208,7 @@ class Decoder(nn.Module):
             ctrl = torch.ones(b, control_ids.shape[1], dtype=torch.long, device=dev)
             attn = torch.cat([mm.long(), ctrl, tm.long()], dim=1)
         with self._mem(memory.shape[1]), self._flags(self._flag_ids(control_ids), memory.shape[1]):
-            return self._run(torch.cat([prefix, tgt], dim=1), labels, attn).loss
+            return self._run(torch.cat([prefix, tgt], dim=1), labels if use_labels else None, attn)
 
     @torch.no_grad()
     def generate(self, memory, control_ids, max_new_tokens: int, eos_id: int,

@@ -1,0 +1,24 @@
+# Fact objective arm K=16: Stage 1 settings (configs/k32_wikionly.yaml) + fact weighting + cloze task.
+# Launched by scripts/fact_objective.py, which overrides run_dir to runs/fact_objective/k16.
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 16
+seed: 0
+run_dir: runs/fact_objective/k16
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 2000
+val_samples: 64
+lr: 0.002
+steps: 3000
+batch_size: 4
+grad_accum: 1
+val_interval: 500
+ckpt_interval: 500
+decoder_lora: false
+decoder_memory_adapter_rank: 8
+qa_val_samples: 40
+val_recall_samples: 10
+fact_weighting: true
+cloze_ratio: 0.3
