@@ -258,6 +258,16 @@ def test_stage3_gates_flag_collapsed_squad_full_output():
     assert "squad_full_length_ratio" in stage3_markdown(g)
 
 
+def test_squad_gates_accept_k16_length_but_flag_recall_lost_after_gate():
+    from engram.eval.report import stage3_gates
+    # K=16 Stage 2's SQuAD <full> length ratio (0.50) is healthy, not a collapse.
+    healthy_short = {**STAGE2_LIKE, "squad_full_length_ratio": 0.5, "answer_recall": 0.25}
+    assert stage3_gates(healthy_short, control=None)["regressions"] == []
+    # Recall that fell well below the 0.25 recall gate means the joint stage lost answers.
+    lost = {**healthy_short, "answer_recall": 0.15}
+    assert stage3_gates(lost, control=None)["regressions"] == ["answer_recall"]
+
+
 def test_joint_stage_trains_squad_full_and_gates_include_squad_metrics(tmp_path):
     from engram.data.compression import make_example
     from engram.data.qa import make_qa_example

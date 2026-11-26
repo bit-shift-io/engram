@@ -43,8 +43,12 @@ STAGE2_GATES = {
 # Baseline = K=16 Stage 2 (runs/20261125-163535/eval/recall.json, n=40); bands are unreviewed:
 # a joint stage that trains <full> on SQuAD paragraphs should beat the untrained baseline.
 SQUAD_GATES = {
-    "squad_full_length_ratio": (0.50, 0.70, 1.30),  # generated / reference <full> length
-    "answer_recall": (0.075, 0.075, None),  # gold answer appears in the <full> output
+    # generated / reference <full> length; floor catches collapse (Stage 3 gave ~0.02)
+    # without flagging K=16 Stage 2's healthy 0.50
+    "squad_full_length_ratio": (0.50, 0.40, 1.30),
+    # gold answer appears in the <full> output; floor allows a ~5-point drop below
+    # the 0.25 recall gate the joint stage only runs after passing
+    "answer_recall": (0.075, 0.20, None),
 }
 K32_THRESHOLD = 0.5  # memory F1 / text-QA control F1 below this -> run a K=32 arm
 
