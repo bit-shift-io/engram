@@ -14,3 +14,5 @@
 - **Text-QA control** — baseline reading the paragraph as plain text instead of memory, trained the same way. The denominator for the memory QA ratio.
 - **`<full>` gap** — mean `<full>` val loss with zeroed memory minus with real memory (nats). Stage 2 ≈ 1.0.
 - **Regression gate** — a Stage 3 metric (`<full>` gap, terse/full length ratios, `<terse>` ROUGE-L) checked against the Stage 2 band; outside it = regression. Written to `<run>/eval/stage3.md`.
+- **Answer recall** — share of held-out SQuAD paragraphs whose `<full>` reconstruction from memory contains a gold answer. Measures whether memory keeps specifics. K=16 Stage 2: 7.5%.
+- **Recall gate** — answer recall threshold (25%) after the K=32 warm-up; below it the joint stage does not run.
