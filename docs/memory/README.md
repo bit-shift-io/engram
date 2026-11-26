@@ -6,3 +6,5 @@
 - [decoder-ignores-memory](decoder-ignores-memory.md) — decoder LoRA shortcut ignores memory: train frozen + memory-only k/v adapter; LoRA later at low LR
 - [prefix-control-token-ignored](prefix-control-token-ignored.md) — one <full>/<terse> token gets overridden; use control_vectors, a balanced mix, and replay old modes on each new mode's input type (Stage 3 <full> collapsed on SQuAD)
 - [memory-necessity-eval](memory-necessity-eval.md) — judge memory by real vs shuffled vs zeroed on held-out chunks, not by loss
+- [reconstruction-mix-dilutes-wikitext](reconstruction-mix-dilutes-wikitext.md) — adding SQuAD chunks by replacing WikiText (plus EOS padding) stalled K=32 warm-up; add on top, strip padding; K=32 plateaus ~1200 steps
+- [reconstruction-keeps-gist-not-facts](reconstruction-keeps-gist-not-facts.md) — token-averaged reconstruction keeps gist (F1 ~0.2) but not facts (answer recall 5–7.5%, K=16 and K=32); needs a fact-rewarding objective
