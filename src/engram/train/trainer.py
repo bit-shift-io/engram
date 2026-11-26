@@ -11,6 +11,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import torch
+
 import yaml
 
 from engram.config import Config
@@ -18,6 +19,7 @@ from engram.data.compression import full_example
 from engram.data.mixed import MixedSampler
 from engram.eval.density import evaluate_density
 from engram.eval.qa import evaluate_qa
+from engram.eval.recall import evaluate_recall
 from engram.eval.report import load_control_result, stage3_gates, stage3_markdown
 from engram.train.losses import reconstruction_loss, validation_loss
 
@@ -111,9 +113,13 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
     multi = None
     if cfg.multi_full_ratio > 0:
         multi = [full_example(e, eng.eos_id) for e in terse_train]
+    squad_full = None
+    if cfg.squad_full_ratio > 0:
+        squad_full = _squad_paragraph_examples(answer_train, eng.eos_id)
     sampler = MixedSampler(train_chunks, terse_train, cfg.full_ratio, cfg.batch_size, gen,
                            multi_full=multi, multi_ratio=cfg.multi_full_ratio,
-                           answer=answer_train, answer_ratio=cfg.answer_ratio)
+                           answer=answer_train, answer_ratio=cfg.answer_ratio,
+                           squad_full=squad_full, squad_ratio=cfg.squad_full_ratio)
     eng.train()
     metrics = open(run_dir / "metrics.jsonl", "a")
 
@@ -127,7 +133,7 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
         for g in opt.param_groups:
             g["lr"] = lr_at(step, cfg) * g["scale"]
         opt.zero_grad()
-        total, counts = 0.0, {"full": 0, "multi": 0, "terse": 0, "answer": 0}
+        total, counts = 0.0, {"full": 0, "multi": 0, "squad_full": 0, "terse": 0, "answer": 0}
         for _ in range(cfg.grad_accum):
             density, batch = sampler.next()
             counts[density] += 1
@@ -141,7 +147,7 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
         if len(opt.param_groups) > 1:
             extra = {"encoder_lr": opt.param_groups[0]["lr"]}
         log(step=n, train_loss=total, lr=opt.param_groups[-1]["lr"], grad_norm=gnorm,
-            n_full=counts["full"], n_multi=counts["multi"], n_terse=counts["terse"],
+            n_full=counts["full"], n_multi=counts["multi"], n_squad_full=counts["squad_full"], n_terse=counts["terse"],
             n_answer=counts["answer"], secs=time.time() - t0, **extra)
         if n % cfg.val_interval == 0 or n == cfg.steps:
             row = {"val_loss": validation_loss(eng, val_chunks, cfg.batch_size)}
@@ -154,6 +160,12 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
                 row["answer_val_loss"] = _terse_val_loss(eng, answer_val, cfg.batch_size)
             if cfg.val_gen_samples and answer_val:
                 row.update(_generation_val(eng, cfg, val_chunks, terse_val, answer_val))
+            if cfg.val_recall_samples and answer_val:
+                rec = evaluate_recall(eng, answer_val[: cfg.val_recall_samples])
+                row.update({"answer_recall": rec["answer_recall"],
+                            "recon_token_f1": rec["recon_token_f1"],
+                            "squad_full_length_ratio": rec["length_ratio"]})
+                eng.train()
             log(step=n, **row)
             last_val = row
         if n % cfg.ckpt_interval == 0 or n == cfg.steps:
@@ -162,6 +174,18 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
     if cfg.val_gen_samples and answer_val and last_val:
         _write_gates(run_dir, last_val, load_control_result(cfg.text_qa_result))
     return run_dir
+
+
+def _squad_paragraph_examples(examples: list[dict], eos_id: int) -> list[dict]:
+    """Whole-paragraph <full> examples, one per distinct SQuAD paragraph (examples repeat a
+    paragraph once per question)."""
+    seen, out = set(), []
+    for ex in examples:
+        key = tuple(ex["chunks"].flatten().tolist())
+        if key not in seen:
+            seen.add(key)
+            out.append(full_example(ex, eos_id))
+    return out
 
 
 def _write_gates(run_dir: Path, row: dict, control: dict | None) -> None:

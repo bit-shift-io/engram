@@ -1,0 +1,21 @@
+{
+  "metrics": {
+    "full_gap": -0.3498813062906265,
+    "terse_article_ratio": 0.35924808540264563,
+    "full_article_ratio": 1.4426055929449988,
+    "terse_rouge_l": 0.011235955056179775,
+    "squad_full_length_ratio": 1.4545454545454546,
+    "answer_recall": 0.0,
+    "qa_real_f1": 0.0
+  },
+  "regressions": [
+    "full_gap",
+    "terse_article_ratio",
+    "full_article_ratio",
+    "terse_rouge_l",
+    "squad_full_length_ratio",
+    "answer_recall"
+  ],
+  "memory_over_control_f1": null,
+  "recommend_k32": null
+}

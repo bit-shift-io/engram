@@ -1,0 +1,51 @@
+# Stage 3b joint stage (K=32): from the K=32 warm-up checkpoint, train <answer>/<full>/<terse> together.
+# Run: HF_HOME=$PWD/.hf HF_HUB_OFFLINE=1 uv run scripts/train.py --config configs/stage3b_joint.yaml \
+#        --init-from runs/<stage3b_warmup run>/ckpt-2600.pt
+# Shares of micro-batches: 40% <answer> (SQuAD train), 35% <full>, 25% <terse> XSum.
+#   full_ratio = 0.35 / 0.60 (it splits the non-answer draws). Of <full>: squad_full_ratio 0.5 whole
+#   SQuAD train paragraphs (17.5%), then multi_full_ratio 0.5 of the rest whole XSum articles (8.75%,
+#   so <full> trains on the XSum input it is gated on) and 1-chunk WikiText (8.75%).
+# All three control vectors start at zero together (the warm-up has no control vectors / decoder LoRA).
+# LRs as Stage 2/3: decoder LoRA 3e-4, encoder side x 0.33 (docs/memory/decoder-ignores-memory.md).
+# Budget (timed from a K=32 checkpoint on this CPU, 24 steps): mean 13.2 s/step (6-31 s; whole-XSum
+#   <full> micro-batches are the slow ones and were under-drawn) -> plan 15 s. 600 steps x 15 s = 2.5 h.
+#   Val (losses + QA gen x3 conditions + density on 8 + recall on 10): ~4.3 min measured at n=2 with an
+#   untrained model generating to max length; plan ~9 min at n=8/10. 5 vals (every 120) ~ 45 min.
+#   Total ~ 3.25 h, under the 3.5 h share.
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 32
+seed: 0
+run_dir: runs
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 2000
+val_samples: 64
+lr: 0.0003
+encoder_lr_scale: 0.33
+answer_ratio: 0.4
+full_ratio: 0.5833333333333334
+squad_full_ratio: 0.5
+multi_full_ratio: 0.5
+terse_dataset: EdinburghNLP/xsum
+terse_train_samples: 2000
+terse_val_samples: 32
+qa_dataset: rajpurkar/squad
+qa_train_samples: 4000
+qa_val_samples: 40
+max_chunks: 4
+max_summary_tokens: 64
+val_gen_samples: 8
+val_recall_samples: 10
+val_max_full_tokens: 0
+steps: 600
+batch_size: 4
+grad_accum: 2
+warmup_steps: 20
+val_interval: 120
+ckpt_interval: 60
+decoder_lora: true
+decoder_memory_adapter_rank: 8
+control_vectors: true
+text_qa_result: runs/text_qa_control_3b.json

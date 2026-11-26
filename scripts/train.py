@@ -9,7 +9,7 @@ import torch
 from engram.config import load_config
 from engram.data.compression import load_terse_examples
 from engram.data.qa import load_qa_examples
-from engram.data.reconstruction import load_chunks
+from engram.data.reconstruction import load_chunks, mix_chunks
 from engram.model.base import load_base_model
 from engram.model.engram import Engram
 from engram.train.trainer import train
@@ -38,8 +38,12 @@ def main(argv=None) -> None:
         terse_train = load_terse_examples(cfg, tok, "train", cfg.terse_train_samples)
         terse_val = load_terse_examples(cfg, tok, "validation", cfg.terse_val_samples)
     answer_train = answer_val = None
+    if cfg.squad_recon_share > 0:
+        train_chunks = mix_chunks(train_chunks, load_qa_examples(cfg, tok, "train", cfg.qa_train_samples),
+                                  cfg.squad_recon_share, cfg.seed)
     if cfg.answer_ratio > 0:
         answer_train = load_qa_examples(cfg, tok, "train", cfg.qa_train_samples)
+    if cfg.answer_ratio > 0 or cfg.val_recall_samples > 0:
         answer_val = load_qa_examples(cfg, tok, "validation", cfg.qa_val_samples)
     eng = Engram(model, tok, cfg)
     print("run dir:", train(eng, cfg, train_chunks, val_chunks, terse_train, terse_val,

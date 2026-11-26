@@ -1,0 +1,91 @@
+{
+  "warmup": "runs_smoke_k32/stage3b/warmup/20261126-113857",
+  "gate": {
+    "k": 32,
+    "n": 2,
+    "answer_recall": 0.0,
+    "recon_token_f1": 0.0,
+    "length_ratio": 1.4545454545454546
+  },
+  "joint": "runs_smoke_k32/stage3b/joint/20261126-114115",
+  "text_qa": {
+    "n": 200,
+    "em": 0.075,
+    "f1": 0.19918733649341738,
+    "run": "runs_smoke_k32/stage3b/text-qa-20261126-114629",
+    "steps": 2
+  },
+  "final_eval": {
+    "qa": {
+      "k": 32,
+      "n": 40,
+      "seed": 0,
+      "real": {
+        "em": 0.0,
+        "f1": 0.0
+      },
+      "shuffled": {
+        "em": 0.0,
+        "f1": 0.0
+      },
+      "zeroed": {
+        "em": 0.0,
+        "f1": 0.005
+      },
+      "base_zero_shot": {
+        "em": 0.025,
+        "f1": 0.1913645948614484
+      },
+      "text_qa_control": {
+        "n": 200,
+        "em": 0.075,
+        "f1": 0.19918733649341738,
+        "run": "runs_smoke_k32/stage3b/text-qa-20261126-114629",
+        "steps": 2
+      },
+      "memory_over_control_f1": 0.0
+    },
+    "recall": {
+      "k": 32,
+      "n": 2,
+      "answer_recall": 0.0,
+      "recon_token_f1": 0.0,
+      "length_ratio": 1.4545454545454546
+    },
+    "density": {
+      "k": 32,
+      "compression_ratio": 4.0,
+      "mean_article_len": 321.84375,
+      "terse_article_ratio": 0.3017731860445163,
+      "full_article_ratio": 1.2755124466926633,
+      "n": 32,
+      "mean_full_len": 373.0,
+      "mean_terse_len": 64.0,
+      "length_ratio": 0.21387043710529557,
+      "terse_rouge_l": 0.019549658303464928,
+      "baseline_rouge_l": 0.10834599952278269
+    },
+    "val": {
+      "step": 2,
+      "val_loss": 4.552113384008408,
+      "terse_val_loss": 7.961547255516052,
+      "multi_val_loss": 3.7807055711746216,
+      "answer_val_loss": 5.904550695419312,
+      "qa_real_em": 0.0,
+      "qa_real_f1": 0.0,
+      "qa_shuffled_em": 0.0,
+      "qa_shuffled_f1": 0.0,
+      "qa_zeroed_em": 0.0,
+      "qa_zeroed_f1": 0.0,
+      "full_gap": -0.11798296868801117,
+      "length_ratio": 0.2490272373540856,
+      "terse_article_ratio": 0.35924808540264563,
+      "full_article_ratio": 1.4426055929449988,
+      "terse_rouge_l": 0.02247191011235955,
+      "baseline_rouge_l": 0.12623925974884337,
+      "answer_recall": 0.0,
+      "recon_token_f1": 0.0,
+      "squad_full_length_ratio": 1.4545454545454546
+    }
+  }
+}

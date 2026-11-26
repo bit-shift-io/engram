@@ -1,0 +1,24 @@
+# Stage 3b K=32 reconstruction warm-up. Copies configs/stage1.yaml LRs/schedule; only K and data change
+# (50% of train chunks are SQuAD train paragraph chunks). New data cache keys need the Hub once.
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 32
+seed: 0
+run_dir: runs
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 2000
+val_samples: 64
+squad_recon_share: 0.5
+qa_train_samples: 4000
+qa_val_samples: 40
+val_recall_samples: 10
+lr: 0.002
+steps: 2600  # measured ~3.9 s per step at K=32 -> ~2.8 h plus val
+batch_size: 4
+grad_accum: 1
+val_interval: 300
+ckpt_interval: 500
+decoder_lora: false
+decoder_memory_adapter_rank: 8

@@ -1,0 +1,15 @@
+batch_size: 4
+chunk_size: 128
+device: cpu
+grad_accum: 2
+lora_alpha: 16
+lora_r: 8
+lr: 0.0003
+max_chunks: 4
+model_name: HuggingFaceTB/SmolLM2-135M
+qa_eval_samples: 200
+qa_train_samples: 4000
+run_dir: runs_smoke_k32/stage3b
+text_qa_result: runs_smoke_k32/stage3b/text_qa_control.json
+text_qa_steps: 2
+warmup_steps: 20

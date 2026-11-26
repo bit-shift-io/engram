@@ -1,4 +1,4 @@
-"""Usage: uv run scripts/eval.py --run runs/<id> [runs/<id2> ...] [--suite reconstruction|density|qa] [--n 32]
+"""Usage: uv run scripts/eval.py --run runs/<id> [runs/<id2> ...] [--suite reconstruction|density|qa|recall] [--n 32]
 
 Evaluates each run's latest checkpoint, writes <run>/eval/reconstruction.{json,md},
 and prints one comparison table (e.g. for the K sweep) across all runs.
@@ -17,6 +17,7 @@ from engram.data.compression import load_terse_examples
 from engram.eval.density import density_markdown, evaluate_density, write_density_report
 from engram.eval.reconstruct import evaluate_reconstruction
 from engram.eval.qa import evaluate_qa, qa_markdown, write_qa_report
+from engram.eval.recall import evaluate_recall, recall_markdown, write_recall_report
 from engram.eval.report import load_control_result, markdown_table, write_run_report
 from engram.model.base import load_base_model
 from engram.model.engram import Engram
@@ -33,7 +34,7 @@ def latest_checkpoint(run_dir: Path) -> Path:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", "--runs", dest="runs", nargs="+", required=True)
-    ap.add_argument("--suite", default="reconstruction", choices=["reconstruction", "density", "qa"])
+    ap.add_argument("--suite", default="reconstruction", choices=["reconstruction", "density", "qa", "recall"])
     ap.add_argument("--n", type=int, default=0, help="held-out chunks (default cfg.val_samples)")
     ap.add_argument("--qa", action="store_true", help="same as --suite qa")
     args = ap.parse_args(argv)
@@ -55,6 +56,15 @@ def main(argv=None) -> None:
             write_qa_report(run, result, control=load_control_result(cfg.text_qa_result))
             results.append(result)
             continue
+        if args.suite == "recall":
+            # cache is keyed by n: load 200 dev examples and slice
+            examples = load_qa_examples(cfg, tok, "validation", 200)[: args.n or 40]
+            eng = Engram(model, tok, cfg)
+            load_checkpoint(eng, latest_checkpoint(run))
+            result = evaluate_recall(eng, examples)
+            write_recall_report(run, result)
+            results.append(result)
+            continue
         if args.suite == "density":
             examples = load_terse_examples(cfg, tok, "validation", args.n or cfg.terse_val_samples)
             eng = Engram(model, tok, cfg)
@@ -69,7 +79,7 @@ def main(argv=None) -> None:
         result = evaluate_reconstruction(eng, chunks)
         write_run_report(run, result)
         results.append(result)
-    tables = {"density": density_markdown, "qa": qa_markdown}
+    tables = {"density": density_markdown, "qa": qa_markdown, "recall": recall_markdown}
     print(tables.get(args.suite, markdown_table)(results))
 
 

@@ -77,6 +77,14 @@ class Config:
     # on the first N terse_val articles, generated at every val step; 0 = off (generation is slow)
     val_gen_samples: int = 0
     val_max_full_tokens: int = 0  # cap on <full> generation during val density; 0 = article length
+    # Stage 3b warm-up: fraction of reconstruction train chunks drawn from SQuAD train paragraphs
+    # (needs qa_train_samples examples to draw from; 0 = WikiText only)
+    squad_recon_share: float = 0.0
+    # Stage 3b joint: fraction of <full> micro-batches that rebuild a whole SQuAD train paragraph
+    # (distinct paragraphs of the answer_train examples); multi_full_ratio splits the rest
+    squad_full_ratio: float = 0.0
+    # validation: <full> answer recall on the first N answer_val examples (needs answer_val; 0 = off)
+    val_recall_samples: int = 0
     # Text-QA control (scripts/train_text_qa.py): frozen base + one LoRA (lora_r, lr) trained on
     # `paragraph\nQuestion: q\nAnswer:` -> answer. Optimizer steps, each grad_accum micro-batches of
     # batch_size; set to Stage 3's answer_ratio * steps so both see the same number of QA examples.

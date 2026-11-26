@@ -1,0 +1,20 @@
+# Text-QA control for Stage 3b (configs/stage3b_joint.yaml): frozen SmolLM2 + one LoRA trained on
+# `paragraph\nQuestion: q\nAnswer:` -> answer. Same lora_r/alpha, lr 3e-4, batch_size, grad_accum as
+# the joint stage, and text_qa_steps = answer_ratio (0.4) x joint steps, so the control sees as many
+# QA examples as the joint stage's <answer> share. Keep in sync with stage3b_joint.yaml `steps`.
+# Run: HF_HOME=$PWD/.hf HF_HUB_OFFLINE=1 uv run scripts/train_text_qa.py --config configs/text_qa_3b.yaml
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+max_chunks: 4
+lora_r: 8
+lora_alpha: 16
+lr: 0.0003
+batch_size: 4
+grad_accum: 2
+warmup_steps: 20
+# = answer_ratio 0.4 x 600 steps of configs/stage3b_joint.yaml
+text_qa_steps: 240
+qa_train_samples: 4000
+qa_eval_samples: 200
+text_qa_result: runs/text_qa_control_3b.json

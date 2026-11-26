@@ -47,3 +47,30 @@ def load_chunks(cfg: Config, tokenizer, split: str, n: int) -> torch.Tensor:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(t, path)
     return t
+
+
+def squad_paragraph_chunks(examples: list[dict], n: int) -> torch.Tensor:
+    """[n, chunk_size] chunks from distinct SQuAD paragraphs (examples repeat a paragraph per question)."""
+    seen, out = set(), []
+    for ex in examples:
+        key = tuple(ex["chunks"].flatten().tolist())
+        if key in seen:
+            continue
+        seen.add(key)
+        out += list(ex["chunks"])
+        if len(out) >= n:
+            break
+    if len(out) < n:
+        raise ValueError(f"only {len(out)} SQuAD paragraph chunks available, wanted {n}")
+    return torch.stack(out[:n])
+
+
+def mix_chunks(wiki: torch.Tensor, squad_examples: list[dict], share: float, seed: int = 0) -> torch.Tensor:
+    """len(wiki) chunks: round(share * len) from SQuAD paragraphs, the rest WikiText, shuffled."""
+    n = len(wiki)
+    n_sq = round(share * n)
+    if n_sq == 0:
+        return wiki
+    mixed = torch.cat([wiki[: n - n_sq], squad_paragraph_chunks(squad_examples, n_sq)])
+    g = torch.Generator().manual_seed(seed)
+    return mixed[torch.randperm(n, generator=g)]

@@ -77,3 +77,17 @@ Diagnosis (40 dev paragraphs, `<full>` reconstruction from memory):
 - Stage 3 checkpoint: `<full>` on SQuAD paragraphs outputs a short answer-like string ("1999") and stops. `<answer>` overrode `<full>` on the input type it was trained on; the XSum-only gates could not see it.
 
 Next: re-plan with K = 32, all three modes trained jointly (with `<full>` replay on SQuAD paragraphs), and gates for `<full>` on SQuAD and answer-in-reconstruction.
+
+## Stage 3b: K = 32, joint modes (unattended pipeline)
+
+`scripts/stage3b.py` runs, unattended and in order: K=32 warm-up (`configs/stage3b_warmup.yaml`) → recall gate (answer recall of `<full>` on 40 SQuAD dev paragraphs, threshold 0.25; `engram.eval.report.recall_gate`) → gate summary → joint stage (`configs/stage3b_joint.yaml`, initialised from the warm-up's last checkpoint) → text-QA control (`configs/text_qa_3b.yaml`) → final `qa`, `recall` and `density` evals of the joint run → final summary (memory QA EM/F1 real/shuffled/zeroed, control F1, memory ÷ control ratio, answer recall, all Stage 2 and SQuAD `<full>` regression gates).
+
+Everything goes under `runs/stage3b/`: derived configs, `warmup/<ts>`, `joint/<ts>`, `text-qa-<ts>`, `gate.{json,md}`, `final.{json,md}` and `state.json`. Gate below 0.25 → the pipeline writes the gate summary, prints the reason and stops (exit 1) before the joint stage. Re-running the same command resumes: finished stages are skipped (state.json) and an interrupted training stage resumes from its latest checkpoint. Budget ~7.2 h on CPU.
+
+How to run:
+
+```
+HF_HOME=$PWD/.hf HF_HUB_OFFLINE=1 nohup uv run scripts/stage3b.py > runs/stage3b.log 2>&1 &
+# smoke (tiny steps, runs_smoke_k32/stage3b; --gate-threshold 0 so the untrained gate passes)
+HF_HOME=$PWD/.hf HF_HUB_OFFLINE=1 uv run scripts/stage3b.py --smoke --gate-threshold 0
+```

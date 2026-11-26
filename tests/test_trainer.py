@@ -211,3 +211,73 @@ def test_stage3_validation_logs_qa_f1_full_gap_density_and_writes_gates(tmp_path
         assert math.isfinite(val[k]), k
     gates = json.loads((run / "eval" / "stage3.json").read_text())
     assert "regressions" in gates and (run / "eval" / "stage3.md").exists()
+
+
+def test_validation_logs_answer_recall_when_enabled(tmp_path):
+    from engram.data.qa import make_qa_example
+
+    tr, va = data()
+    tok = make_tiny_tokenizer()
+    qa = [make_qa_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(4 + 3 * i)),
+                          f"w{40 + i}", f"w{i + 2}", 8, 4, answers=[f"w{i + 2}"]) for i in range(3)]
+    cfg = cfg_for(tmp_path, steps=2, val_interval=2, val_recall_samples=2)
+    run = train(build(cfg), cfg, tr, va, answer_val=qa)
+    val = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()
+           if "val_loss" in l][-1]
+    assert 0.0 <= val["answer_recall"] <= 1.0 and math.isfinite(val["recon_token_f1"])
+
+
+def test_mixed_sampler_draws_squad_paragraph_full_at_configured_share():
+    from engram.data.compression import make_example
+    from engram.data.mixed import MixedSampler
+    from engram.data.qa import make_qa_example
+
+    tok = make_tiny_tokenizer()
+    full = torch.randint(2, 64, (20, 8))
+    terse = [make_example(tok, "w1 w2", "w3", 8, 4) for _ in range(10)]
+    qa = [make_qa_example(tok, "w1 w2", "w3", "w4", 8, 4) for _ in range(10)]
+    para = [{"chunks": q["chunks"], "target": torch.tensor([5, 6, 0]), "density": "full"}
+            for q in qa]
+    s = MixedSampler(full, terse, full_ratio=0.35 / 0.6, batch_size=3,
+                     generator=torch.Generator().manual_seed(0), answer=qa, answer_ratio=0.4,
+                     squad_full=para, squad_ratio=0.5)
+    names = [k for k, b in (s.next() for _ in range(4000))]
+    assert abs(names.count("answer") / 4000 - 0.40) < 0.03
+    assert abs(names.count("squad_full") / 4000 - 0.175) < 0.03
+    assert abs(names.count("full") / 4000 - 0.175) < 0.03
+    assert abs(names.count("terse") / 4000 - 0.25) < 0.03
+
+
+def test_stage3_gates_flag_collapsed_squad_full_output():
+    from engram.eval.report import stage3_gates, stage3_markdown
+    ok = {**STAGE2_LIKE, "squad_full_length_ratio": 0.95, "answer_recall": 0.4}
+    assert stage3_gates(ok, control=None)["regressions"] == []
+    short = {**ok, "squad_full_length_ratio": 0.2, "answer_recall": 0.02}
+    g = stage3_gates(short, control=None)
+    assert set(g["regressions"]) == {"squad_full_length_ratio", "answer_recall"}
+    assert "squad_full_length_ratio" in stage3_markdown(g)
+
+
+def test_joint_stage_trains_squad_full_and_gates_include_squad_metrics(tmp_path):
+    from engram.data.compression import make_example
+    from engram.data.qa import make_qa_example
+
+    tr, va = data()
+    tok = make_tiny_tokenizer()
+    terse = [make_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(5 + 6 * i)), "w1 w2",
+                          8, 4) for i in range(4)]
+    qa = [make_qa_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(4 + 7 * i)),
+                          f"w{40 + i} w50", f"w{i + 2}", 8, 4, answers=[f"w{i + 2}"])
+          for i in range(4)]
+    cfg = cfg_for(tmp_path, control_vectors=True, answer_ratio=0.4, full_ratio=0.6,
+                  squad_full_ratio=1.0, steps=6, val_interval=6, val_gen_samples=2,
+                  val_recall_samples=2, val_max_full_tokens=8)
+    run = train(build(cfg), cfg, tr, va, terse_train=terse, terse_val=terse[:3],
+                answer_train=qa, answer_val=qa[:3])
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    steps = [r for r in rows if "train_loss" in r]
+    assert sum(r["n_squad_full"] for r in steps) > 0 and sum(r["n_full"] for r in steps) == 0
+    assert all(math.isfinite(r["train_loss"]) for r in steps)
+    gates = json.loads((run / "eval" / "stage3.json").read_text())
+    assert gates["metrics"]["squad_full_length_ratio"] is not None
+    assert gates["metrics"]["answer_recall"] is not None
