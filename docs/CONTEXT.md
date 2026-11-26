@@ -16,3 +16,15 @@
 - **Regression gate** — a Stage 3 metric (`<full>` gap, terse/full length ratios, `<terse>` ROUGE-L) checked against the Stage 2 band; outside it = regression. Written to `<run>/eval/stage3.md`.
 - **Answer recall** — share of held-out SQuAD paragraphs whose `<full>` reconstruction from memory contains a gold answer. Measures whether memory keeps specifics. K=16 Stage 2: 7.5%.
 - **Recall gate** — answer recall threshold (25%) after the K=32 warm-up; below it the joint stage does not run.
+
+## Fact token
+- **Definition:** A chunk token inside a detected name, number or date span.
+- **Boundary:** Detected by text patterns, not NER. Not the same as an answer span.
+
+## Fact weighting
+- **Definition:** Per-token reconstruction loss weight from the frozen decoder's loss on that token with zeroed memory.
+- **Boundary:** Weights are detached and normalised to mean 1 per chunk; they never carry gradient.
+
+## Cloze task
+- **Definition:** The decoder sees a chunk with fact spans blanked and outputs the fact spans, using memory.
+- **Boundary:** A training task only. Answer recall, not cloze loss, measures fact retention.
