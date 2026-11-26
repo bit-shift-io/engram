@@ -53,3 +53,9 @@ Lint: none configured
 - Surprises: gate bands chosen by implementer (gap ≥0.9; terse/article 0.05–0.15; full/article 0.80–1.05; ROUGE-L ≥0.164) — need confirming. Smoke flagged full_article_ratio 0.675 on 8 articles (likely noise). Shuffled F1 = real F1 in smoke. stage3 report needs the control result to exist first. SQuAD cached 3200 train / 200 val.
 - Remaining: run control, then overnight Stage 3, then eval --qa / --suite density, record results in docs/training.md + docs/memory.
 - Built by: slice-implementer · opus-5.5 · 58987 · verification passed first time
+
+## Stage 3 outcome (2026-11-26) — negative; slice 04 left in-progress
+- Overnight run runs/20261126-072712 + control runs/text-qa-20261126-064050 done. Memory F1 0.051 vs shuffled 0.048, control 0.687, ratio 0.074.
+- Diagnostic: Stage 2 memory keeps answer in <full> recon 7.5% (token F1 0.26); Stage 3 <full> on SQuAD collapses to a short answer ("1999").
+- Recorded in docs/training.md (Stage 3 results) and docs/memory/prefix-control-token-ignored.md.
+- Decision: re-plan via plan-feature — K=32, short reconstruction warm-up, then joint <full>/<terse>/<answer> with <full> replay on SQuAD; add SQuAD <full> and answer-in-recon gates.

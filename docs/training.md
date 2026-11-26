@@ -58,4 +58,22 @@ uv run scripts/eval.py --run runs/<stage3> --qa
 uv run scripts/eval.py --run runs/<stage3> --suite density
 ```
 
-Results: _pending the overnight run._
+### Results (2026-11-26): negative
+
+Run `runs/20261126-072712` (640 steps, ~2.3 h). Control `runs/text-qa-20261126-064050` (320 steps, 46 min).
+
+| 200 SQuAD dev | EM | F1 |
+|---|---|---|
+| memory, real | 0.005 | 0.051 |
+| memory, shuffled | 0.000 | 0.048 |
+| memory, zeroed | 0.000 | 0.032 |
+| base zero-shot (paragraph in prompt) | 0.070 | 0.196 |
+| text-QA control | 0.635 | 0.687 |
+
+Memory ÷ control F1 = 0.074. Real barely beats shuffled, so memory is not used for answers. The Stage 2 gates (XSum) all passed: `<full>` gap 2.00, terse/article 0.128, full/article 0.884, ROUGE-L 0.203.
+
+Diagnosis (40 dev paragraphs, `<full>` reconstruction from memory):
+- Stage 2 checkpoint: the gold answer appears in the reconstruction 7.5% of the time; token F1 vs paragraph 0.26. K = 16 memory holds gist, not the specifics SQuAD asks about.
+- Stage 3 checkpoint: `<full>` on SQuAD paragraphs outputs a short answer-like string ("1999") and stops. `<answer>` overrode `<full>` on the input type it was trained on; the XSum-only gates could not see it.
+
+Next: re-plan with K = 32, all three modes trained jointly (with `<full>` replay on SQuAD paragraphs), and gates for `<full>` on SQuAD and answer-in-reconstruction.

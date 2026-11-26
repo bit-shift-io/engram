@@ -11,4 +11,5 @@ metadata:
 - `control_vectors: true` adds a learned vector per flag to every decoder layer's residual stream at control + target positions (never memory, never the encoder). It's zero-initialised, so it's a no-op until trained.
 - Don't overwrite fixed hidden dims as an "enum": the frozen base uses every dim, and SmolLM2 has huge outlier dims (17, 507).
 - Keep the mix balanced from the start of a stage: if one input type only ever appears with one flag, the model keys on the input, not the flag. Starting from a checkpoint that already learned the shortcut didn't undo it.
+- It recurred in Stage 3 even with control vectors: `<answer>` trained only on SQuAD paragraphs made `<full>` on those paragraphs emit a short answer and stop. A new mode needs replay of the *other* modes on its own input type, and a regression gate on that input type — gates on the old data (XSum) passed while it was broken.
 - Every output mode must be trained on the memory sizes it will be evaluated on. `<full>` trained only on 1-chunk memory stopped early on 4-chunk memory (`multi_full_ratio`).
