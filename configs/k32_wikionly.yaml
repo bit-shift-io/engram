@@ -1,0 +1,25 @@
+# Stage 3b diagnosis: Stage 1 exactly (configs/stage1.yaml), with only k changed to 32.
+# Separates "K=32 fails to train" from "the SQuAD reconstruction mix fails": the Stage 3b
+# warm-up (k=32 + half SQuAD paragraph chunks, ~26% EOS padding) plateaued at val 2.94 and its
+# decoder barely told real from shuffled memory, while Stage 1 K=16 reached 2.25.
+# val_recall_samples only adds answer-recall logging at validation; it does not change training.
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 32
+seed: 0
+run_dir: runs/k32_wikionly
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 2000
+val_samples: 64
+lr: 0.002
+steps: 3000
+batch_size: 4
+grad_accum: 1
+val_interval: 300
+ckpt_interval: 500
+decoder_lora: false
+decoder_memory_adapter_rank: 8
+qa_val_samples: 40
+val_recall_samples: 10
