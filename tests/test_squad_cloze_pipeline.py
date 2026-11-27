@@ -109,9 +109,10 @@ def load_rescore():
     return mod
 
 
-def rs_result(recall, real, zeroed):
+def rs_result(recall, real, zeroed, cloze=0.0, aligned=0.0):
+    cond = lambda loss, c=0.0, a=0.0: {"answer_loss": loss, "cloze_recall": c, "aligned_recall": a}  # noqa: E731
     return {"recall": {"answer_recall": recall},
-            "cloze": {"real": {"answer_loss": real}, "zeroed": {"answer_loss": zeroed}}}
+            "cloze": {"real": cond(real, cloze, aligned), "shuffled": cond(5.0), "zeroed": cond(zeroed)}}
 
 
 OLD = {"base": {"answer_recall": 0.075, "gap": 1.0}, "new": {"answer_recall": 0.2, "gap": 1.7}}
@@ -146,3 +147,9 @@ def test_rescore_zero_baseline_is_undefined_not_pass(tmp_path):
     s = run_rescore(tmp_path, rs_result(0.0, 3.0, 4.0), rs_result(0.25, 2.0, 4.0))
     assert s["rule"]["answer_recall"]["passed"] is None and not s["passed"]
     assert "undefined" in (tmp_path / "summary.md").read_text()
+
+
+def test_rescore_markdown_shows_cloze_and_aligned_recall_per_checkpoint(tmp_path):
+    run_rescore(tmp_path, rs_result(0.1, 3.0, 4.0, 0.041, 0.023), rs_result(0.25, 2.0, 4.0, 0.188, 0.056))
+    md = (tmp_path / "summary.md").read_text()
+    assert "aligned recall" in md and "0.188" in md and "0.056" in md and "0.041" in md

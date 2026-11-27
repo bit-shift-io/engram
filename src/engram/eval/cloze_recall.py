@@ -38,21 +38,39 @@ CLOZE_DEV_SAMPLES = 3000  # dev examples scanned (cached) to find 40 distinct pa
 
 def select_recall_paragraphs(tokenizer, examples: list[dict], max_len: int,
                              n: int = N_PARAGRAPHS) -> list[tuple[dict, dict]]:
-    """First n distinct paragraphs (in example order) whose first chunk contains a gold answer, as
-    (first source example of the paragraph, gold cloze example built from every question's
-    answers). Duplicate paragraphs and paragraphs without an answer in the first chunk are skipped."""
+    """n distinct paragraphs whose first chunk contains a gold answer, as (first source example of
+    the paragraph, gold cloze example built from every question's answers). Articles (`title`) are
+    taken round-robin in order of first appearance, so the set spans articles rather than the
+    first one in dataset order; within an article, example order. Duplicate paragraphs and
+    paragraphs without an answer in the first chunk are skipped."""
     groups: dict[tuple, tuple[dict, list[str]]] = {}
     for ex in examples:
         groups.setdefault(tuple(ex["chunks"].flatten().tolist()), (ex, []))[1].extend(ex["answers"])
-    out = []
+    by_article: dict[str | None, list] = {}
     for src, answers in groups.values():
-        cloze = make_gold_cloze_example(tokenizer, src["chunks"][0], answers, max_len)
-        if cloze is not None:
-            out.append((src, {**cloze, "answers": sorted(set(answers)),
-                              **({"title": src["title"]} if "title" in src else {})}))
-        if len(out) >= n:
-            break
+        by_article.setdefault(src.get("title"), []).append((src, answers))
+    queues = [iter(v) for v in by_article.values()]
+    out = []
+    while queues and len(out) < n:
+        for q in list(queues):
+            for src, answers in q:  # next qualifying paragraph of this article
+                cloze = make_gold_cloze_example(tokenizer, src["chunks"][0], answers, max_len)
+                if cloze is not None:
+                    out.append((src, {**cloze, "answers": sorted(set(answers)),
+                                      **({"title": src["title"]} if "title" in src else {})}))
+                    break
+            else:
+                queues.remove(q)
+                continue
+            if len(out) >= n:
+                break
     return out
+
+
+def paragraph_recall_examples(picked: list[tuple[dict, dict]]) -> list[dict]:
+    """Answer recall examples for the selected paragraphs: the whole paragraph, every gold answer of
+    every question on it, so answer recall and cloze recall score the same paragraphs."""
+    return [{"chunks": src["chunks"], "answers": c["answers"]} for src, c in picked]
 
 
 def other_article_pool(examples: list[dict], exclude_titles: set[str], n: int = N_PARAGRAPHS) -> list[dict]:

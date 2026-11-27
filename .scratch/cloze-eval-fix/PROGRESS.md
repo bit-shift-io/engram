@@ -28,3 +28,11 @@ Lint: none configured
 - Conventions confirmed: tests use `fact_tokenizer()`, `StubEng` and `qa_ex` in tests/test_cloze.py.
 - Surprises: `src/engram/eval/report.py` `squad_cloze_markdown.row()` (~line 226) still reads `cl[k]["hits"]` → KeyError on new output; left for slice 04. Old results lacking `blanks` cannot be rescored. Follow-up (inline, user choice): SQuAD cache key `-ans-t` now applies to the validation split only; train keeps `-ans`.
 - Built by: slice-implementer · sonnet · 27733 · verification passed first time
+
+## Slice 04 — rescore-checkpoints
+- Built: `scripts/rescore_cloze.py` re-scores both checkpoints into `<run>/eval_rescore/` and writes `runs/cloze_rescore/summary.{json,md}`; relative 2x pass rule flagged per condition; summary markdown also shows cloze/aligned recall per condition.
+- Files touched: scripts/rescore_cloze.py, scripts/eval.py (`--eval-dir`, shuffle pool), src/engram/eval/report.py, src/engram/eval/recall.py, src/engram/eval/cloze_recall.py (`eval_dir`, `shuffle_pool`, `other_article_pool`), src/engram/data/qa.py (`with_title`), scripts/train.py, tests/test_squad_cloze_pipeline.py, tests/test_cloze.py
+- New exports/interfaces: `report.rescore_summary`, `report.rescore_markdown`, `rescore_cloze.run_rescore`, `rescore_cloze.old_scores`; `load_qa_examples(..., with_title=False)`; `evaluate_cloze_recall(..., shuffle_pool=None)`; `other_article_pool(examples, exclude_titles, n)`.
+- Conventions confirmed: script tests load scripts via importlib with stub runners.
+- Surprises: real run failed twice. (1) Slice 02's validation-wide cache rename invalidated the 200-example answer-recall and training val caches → now opt-in `with_title`. (2) All 40 selected eval paragraphs are one article → shuffled memory borrowed from 40 other-article dev paragraphs (user choice), eval set unchanged. Result: PASS — answer recall 0.175 vs 0.025 baseline, gap 1.76 vs 0.73.
+- Built by: slice-implementer · sonnet · 29363 · needed 2 re-runs (fixed inline)

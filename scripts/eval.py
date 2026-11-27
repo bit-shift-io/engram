@@ -15,7 +15,7 @@ from engram.data.reconstruction import load_chunks
 from engram.data.qa import load_qa_examples
 from engram.data.compression import load_terse_examples
 from engram.eval.cloze_recall import (CLOZE_DEV_SAMPLES, cloze_recall_markdown, evaluate_cloze_recall,
-                                       other_article_pool, select_recall_paragraphs,
+                                       other_article_pool, paragraph_recall_examples, select_recall_paragraphs,
                                        write_cloze_recall_report)
 from engram.eval.density import density_markdown, evaluate_density, write_density_report
 from engram.eval.reconstruct import evaluate_reconstruction
@@ -61,8 +61,10 @@ def main(argv=None) -> None:
             results.append(result)
             continue
         if args.suite == "recall":
-            # cache is keyed by n: load 200 dev examples and slice
-            examples = load_qa_examples(cfg, tok, "validation", 200)[: args.n or 40]
+            # the same paragraphs cloze recall scores, spread across articles
+            dev = load_qa_examples(cfg, tok, "validation", CLOZE_DEV_SAMPLES, with_title=True)  # cached
+            examples = paragraph_recall_examples(
+                select_recall_paragraphs(tok, dev, 2 * (cfg.chunk_size + 1), args.n or 40))
             eng = Engram(model, tok, cfg)
             load_checkpoint(eng, latest_checkpoint(run))
             result = evaluate_recall(eng, examples)

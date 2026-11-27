@@ -357,3 +357,23 @@ def test_other_article_pool_takes_distinct_paragraphs_from_other_articles():
     exs[2] = {**exs[1]}  # same paragraph twice (two questions)
     pool = other_article_pool(exs, {"A"}, n=2)
     assert [p["title"] for p in pool] == ["B", "C"]
+
+
+def test_select_recall_paragraphs_takes_articles_round_robin():
+    from engram.eval.cloze_recall import select_recall_paragraphs
+    tok = fact_tokenizer()
+    text = "the band played in March 1999 at Notre Dame . They sold 42 records"
+    dev = [{**qa_ex(tok, text.replace("42", f"w{i + 3}"), ["Notre Dame"]), "title": t}
+           for i, t in enumerate(["A", "A", "A", "A", "B", "B", "C"])]
+    picked = select_recall_paragraphs(tok, dev, max_len=64, n=5)
+    assert [c["title"] for _, c in picked] == ["A", "B", "C", "A", "B"]
+
+
+def test_paragraph_recall_examples_use_whole_paragraph_and_all_answers():
+    from engram.eval.cloze_recall import paragraph_recall_examples, select_recall_paragraphs
+    tok = fact_tokenizer()
+    picked = select_recall_paragraphs(tok, _dev(tok), max_len=64)
+    exs = paragraph_recall_examples(picked)
+    assert len(exs) == len(picked)
+    assert torch.equal(exs[0]["chunks"], picked[0][0]["chunks"])
+    assert exs[0]["answers"] == ["42", "March 1999"]

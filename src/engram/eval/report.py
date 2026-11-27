@@ -275,4 +275,10 @@ def rescore_markdown(s: dict) -> str:
     for name, c in s["checkpoints"].items():
         rows.append(f"| {name} | {c['old']['answer_recall']:.3f} | {c['rescored']['answer_recall']:.3f} | "
                     f"{c['old']['gap']:.2f} | {c['rescored']['gap']:.2f} |")
+    conds = ("real", "shuffled", "zeroed")
+    rows += ["", "Cloze recall (aligned recall), re-scored:", "",
+             "| checkpoint | " + " | ".join(conds) + " |", "|---|" + "---|" * len(conds)]
+    for name, c in s["checkpoints"].items():
+        rows.append(f"| {name} | " + " | ".join(
+            f"{c['cloze'][k]['cloze_recall']:.3f} ({c['cloze'][k]['aligned_recall']:.3f})" for k in conds) + " |")
     return "\n".join(rows)
