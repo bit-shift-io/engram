@@ -20,3 +20,11 @@ Lint: none configured
 - Conventions confirmed: tests use `fact_tokenizer`, `qa_ex`; stub engine at decoder boundary only. Tiny test tokenizer maps most digits to unk — use vocab-safe fixtures.
 - Surprises: Did not reproduce the old K=16 numbers; user re-baselined (see DECISIONS). Baseline K=16 ckpt-3000: real 3.48 / shuffled 4.60 / zeroed 4.21 nats, hits 5/3/11 of 40 — report at runs/fact_objective/k16/20261126-212058/eval/cloze_recall.json. Old val set was effectively empty.
 - Built by: slice-implementer · sonnet · 51421 · verification passed first time (acceptance numbers re-baselined by user)
+
+## Slice 03 — unattended-run
+- Built: unattended SQuAD cloze pipeline (scripts/squad_cloze.py, configs/squad_cloze_k16.yaml, summary with separate pass conditions, early-stop hook). Full run NOT launched (user review point).
+- Files touched: configs/squad_cloze_k16.yaml, scripts/squad_cloze.py, scripts/train.py, src/engram/config.py, src/engram/eval/report.py, src/engram/train/trainer.py, tests/test_squad_cloze_pipeline.py, tests/test_trainer.py
+- New exports/interfaces: Config.early_stop_step (0), early_stop_gap (0.1), squad_cloze_val_max (0); trainer `_early_stop(cfg, n, row)` → <run>/eval/early_stop.json; report.baseline_row, squad_cloze_summary, squad_cloze_markdown; squad_cloze.py run_pipeline(pdir, runners, baseline), make_runners(smoke)
+- Conventions confirmed: pipeline tests load script by path with stub runners; reuse _train_stage/_derive from stage3b.py; state.json resume.
+- Surprises: train.py only loaded answer_train when answer_ratio > 0 (fixed). Added squad_cloze_val_max=100 (483-paragraph val ≈ 10 min). Timing: 4.8 s/step, val ≈ 6.4 min → ≈ 3.3 h total. Leftover runs_smoke_squad_cloze/ and runs/squad_cloze_timing/ need deleting by user.
+- Built by: slice-implementer · sonnet · 82355 · verification passed first time

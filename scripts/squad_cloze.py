@@ -27,7 +27,7 @@ from engram.eval.report import baseline_row, squad_cloze_markdown, squad_cloze_s
 CONFIG = "configs/squad_cloze_k16.yaml"
 RECALL_N = 40
 SMOKE = {"train": {"steps": 4, "val_interval": 2, "ckpt_interval": 2, "val_recall_samples": 2,
-                   "early_stop_step": 0},
+                   "early_stop_step": 0, "squad_cloze_val_max": 4},
          "n": 2}
 
 

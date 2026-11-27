@@ -382,3 +382,15 @@ def test_early_stop_does_not_trigger_when_gap_is_large_enough(tmp_path):
     rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
     assert max(r["step"] for r in rows) == 4
     assert not (run / "eval" / "early_stop.json").exists()
+
+
+def test_squad_cloze_val_max_caps_the_validation_set(tmp_path, monkeypatch):
+    import engram.train.trainer as T
+    seen = []
+    orig = T._terse_val_loss
+    monkeypatch.setattr(T, "_terse_val_loss", lambda eng, ex, bs, f=None: (seen.append(len(ex)), orig(eng, ex, bs, f))[1])
+    tr, va = data()
+    qa = _squad_cloze_data(60)
+    cfg = cfg_for(tmp_path, steps=2, val_interval=2, squad_cloze_ratio=0.5, squad_cloze_val_max=4)
+    train(build(cfg), cfg, tr, va, answer_train=qa, answer_val=qa)
+    assert 4 in seen and max(seen) <= 4 or 4 in seen

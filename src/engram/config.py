@@ -53,6 +53,8 @@ class Config:
     cloze_ratio: float = 0.0
     # share of the remaining <full> batches trained as SQuAD gold-answer cloze (needs answer_train)
     squad_cloze_ratio: float = 0.0
+    # cap on SQuAD cloze val examples per validation (0 = all); val costs ~0.4 s/example/condition
+    squad_cloze_val_max: int = 0
     # stop at this step if |squad_cloze_val_loss real - zeroed| < early_stop_gap (0 = never)
     early_stop_step: int = 0
     early_stop_gap: float = 0.1

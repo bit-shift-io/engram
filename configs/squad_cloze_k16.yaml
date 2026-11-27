@@ -27,5 +27,6 @@ val_recall_samples: 10
 fact_weighting: true
 cloze_ratio: 0.2
 squad_cloze_ratio: 0.375
+squad_cloze_val_max: 100  # 483 held-in val paragraphs would cost ~10 min per validation
 early_stop_step: 1000
 early_stop_gap: 0.1

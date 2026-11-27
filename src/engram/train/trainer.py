@@ -172,6 +172,8 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
         squad_cloze_train = squad_cloze_examples(eng.tokenizer, answer_train, cloze_len)
         if cloze_dev or answer_val:
             squad_cloze_val = squad_cloze_val_examples(eng.tokenizer, cloze_dev or answer_val, cloze_len)
+        if cfg.squad_cloze_val_max:
+            squad_cloze_val = squad_cloze_val[: cfg.squad_cloze_val_max]
         if len(squad_cloze_val) % cfg.batch_size == 1:  # a last batch of 1 cannot be shuffled
             squad_cloze_val = squad_cloze_val[:-1]
     sampler = ClozeSampler(sampler, cfg.cloze_ratio, gen, squad_cloze_train,
