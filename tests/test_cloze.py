@@ -102,3 +102,112 @@ def test_cloze_training_smoke_logs_real_shuffled_zeroed_val_loss(tmp_path):
     val = [r for r in rows if "val_loss" in r][-1]
     for c in ("real", "shuffled", "zeroed"):
         assert math.isfinite(val[f"cloze_val_loss_{c}"])
+
+
+def qa_ex(tok, text, answers, chunk=16):
+    ids_ = tok(text, add_special_tokens=False).input_ids
+    ids_ += [tok.eos_token_id] * (-len(ids_) % chunk)
+    return {"chunks": torch.tensor(ids_).reshape(-1, chunk), "answers": answers}
+
+
+def test_gold_cloze_blanks_every_answer_in_text_order_without_eos():
+    from engram.data.cloze import squad_cloze_examples
+    tok = fact_tokenizer()
+    text = "the band played in March 1999 at Notre Dame . They sold 42 records"
+    exs = [qa_ex(tok, text, ["Notre Dame"]), qa_ex(tok, text, ["March 1999", "42"])]
+    out = squad_cloze_examples(tok, exs, max_len=64)
+    assert len(out) == 1  # paragraph repeated per question -> one example
+    prompt = tok.decode(out[0]["question"])
+    assert prompt.count("___") == 3 and "<eos>" not in prompt and "Dame" not in prompt
+    assert tok.decode(out[0]["target"][:-1]) == "March 1999 | Notre Dame | 42"
+
+
+def test_gold_cloze_drops_answers_outside_first_chunk_and_skips_empty_paragraphs():
+    from engram.data.cloze import squad_cloze_examples
+    tok = fact_tokenizer()
+    text = "the band played in March 1999 at Notre Dame . They sold 42 records"  # 15 tokens
+    long = text + " the band played in w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 Dame"
+    out = squad_cloze_examples(tok, [qa_ex(tok, long, ["42", "w16 Dame", "w20"])], max_len=64)
+    assert tok.decode(out[0]["target"][:-1]) == "42"
+    assert squad_cloze_examples(tok, [qa_ex(tok, text, ["w20"])], max_len=64) == []
+
+
+def _dev(tok):
+    text = "the band played in March 1999 at Notre Dame . They sold 42 records"
+    return [qa_ex(tok, text, ["42"]), qa_ex(tok, text, ["March 1999"]),  # same paragraph twice
+            qa_ex(tok, "the band played in w3 w4", ["w9"]),  # answer not in chunk
+            qa_ex(tok, text.replace("42", "1999"), ["Notre Dame"]),
+            qa_ex(tok, text.replace("42", "March"), ["Dame"])]
+
+
+def test_select_recall_paragraphs_skips_duplicates_and_missing_answers_and_stops_at_n():
+    from engram.eval.cloze_recall import select_recall_paragraphs
+    tok = fact_tokenizer()
+    dev = _dev(tok)
+    sel = select_recall_paragraphs(tok, dev, max_len=64)
+    assert [s for s, _ in sel] == [dev[0], dev[3], dev[4]]
+    assert sorted(sel[0][1]["answers"]) == ["42", "March 1999"]  # answers of both questions
+    assert [s for s, _ in select_recall_paragraphs(tok, dev, max_len=64, n=2)] == [dev[0], dev[3]]
+
+
+def test_trainer_validation_excludes_exactly_the_recall_eval_paragraphs():
+    from engram.eval.cloze_recall import select_recall_paragraphs
+    from engram.train.trainer import squad_cloze_val_examples
+    tok = fact_tokenizer()
+    dev = _dev(tok)
+    # the eval takes n=40 distinct paragraphs; with more than 40 in dev, the rest stay for validation
+    extra = [qa_ex(tok, f"the band played in March 1999 at w{i} Dame", ["Dame"]) for i in range(20)]
+    extra += [qa_ex(tok, f"they sold w{i} records at Notre w{j} Dame .", ["Notre"])
+              for i in range(5) for j in range(5, 9)]
+    dev = dev + extra
+    picked = {tuple(s["chunks"].flatten().tolist()) for s, _ in select_recall_paragraphs(tok, dev, 64)}
+    val = squad_cloze_val_examples(tok, dev, 64)
+    val_keys = {tuple(v["chunks"].flatten().tolist()) for v in val}
+    all_keys = {tuple(d["chunks"][0].tolist()) for d in dev}
+    assert len(picked) == 40 and val  # full recall set held out, something left to validate on
+    assert not (picked & val_keys) and len(val) == len(all_keys - picked) - 1  # minus the no-answer paragraph
+
+
+class StubEng:
+    """Decoder stub: generation replays scripted text per memory id; loss is scripted per condition."""
+    class cfg:
+        k = 4
+        device = "cpu"
+    eos_id = 0
+
+    def __init__(self, tok, outputs):
+        self.tokenizer, self.outputs, self.decoder = tok, outputs, self
+        self.seen = []
+
+    def eval(self):
+        pass
+
+    def encode(self, ids):  # memory value = first token id
+        return ids[:, :1].float().unsqueeze(-1)
+
+    def _control(self, density, b):
+        return torch.zeros(b, 1, dtype=torch.long)
+
+    def generate(self, mem, ctrl, n, eos, question_ids=None):
+        return self.tokenizer(self.outputs.get(round(float(mem.flatten()[0])), "w1"), add_special_tokens=False).input_ids
+
+    def terse_loss(self, examples, memory_transform=None):
+        mem = torch.tensor([[float(e["chunks"][0, 0])] for e in examples]).unsqueeze(-1)
+        m = mem if memory_transform is None else memory_transform(mem)
+        return (m == 0).float().mean() * 4 + (m != mem).float().mean() * 2 + 1  # real 1, shuffled 3, zeroed 5
+
+
+def test_evaluate_cloze_recall_hit_rate_and_loss_per_condition():
+    from engram.eval.cloze_recall import evaluate_cloze_recall
+    tok = fact_tokenizer()
+    exs = [{"chunks": ids(tok, t)[None], "question": ids(tok, "the ___ Answers:"), "density": "full",
+            "answers": [a]} for t, a in [("March w3", "42"), ("Notre w4", "Dame"), ("42 w5", "records"),
+                                         ("Dame w6", "1999")]]
+    # memory id -> generated text; real memory answers right in first segment for 2 of 4
+    outs = {int(exs[0]["chunks"][0, 0]): "42 | w1", int(exs[1]["chunks"][0, 0]): "Dame | w1",
+            int(exs[2]["chunks"][0, 0]): "w1 | records", int(exs[3]["chunks"][0, 0]): "w1"}
+    r = evaluate_cloze_recall(StubEng(tok, outs), exs, batch_size=4)
+    assert r["real"]["hits"] == 2 and r["real"]["hit_rate"] == 0.5 and r["n"] == 4
+    assert r["shuffled"]["hits"] == 0  # shifted memory yields the neighbour's text
+    assert r["zeroed"]["hits"] == 0
+    assert r["real"]["answer_loss"] < r["shuffled"]["answer_loss"] < r["zeroed"]["answer_loss"]

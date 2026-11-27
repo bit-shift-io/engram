@@ -17,8 +17,9 @@ import yaml
 from engram.config import Config
 from engram.data.compression import full_example
 from engram.data.mixed import MixedSampler
-from engram.data.cloze import ClozeSampler, make_cloze_example
+from engram.data.cloze import ClozeSampler, make_cloze_example, squad_cloze_examples
 from engram.eval.ablation import CONDITIONS, zero_memory
+from engram.eval.cloze_recall import select_recall_paragraphs
 from engram.eval.density import evaluate_density
 from engram.eval.qa import evaluate_qa
 from engram.eval.recall import evaluate_recall
@@ -93,9 +94,16 @@ def _batch_loss(eng, density: str, batch) -> torch.Tensor:
     # "multi" (multi-chunk <full>), "terse" and "answer" batches are lists of examples with their own density.
     if density == "cloze":
         return eng.terse_loss(cloze_examples(eng, batch))
-    if density != "full":
+    if density != "full":  # incl. "squad_cloze": a list of ready cloze examples
         return eng.terse_loss(batch)
     return fact_weighted_loss(eng, batch) if eng.cfg.fact_weighting else reconstruction_loss(eng, batch)
+
+
+def squad_cloze_val_examples(tokenizer, dev: list[dict], max_len: int) -> list[dict]:
+    """Validation cloze examples from SQuAD dev, without the paragraphs the cloze recall eval
+    selects from the same `dev` examples (n=40), so that eval stays unseen."""
+    held_out = [src for src, _ in select_recall_paragraphs(tokenizer, dev, max_len)]
+    return squad_cloze_examples(tokenizer, dev, max_len, exclude=held_out)
 
 
 def cloze_examples(eng, chunk_ids: torch.Tensor, fallback: bool = True) -> list[dict]:
@@ -130,7 +138,8 @@ def fact_weighted_loss(eng, chunk_ids: torch.Tensor) -> torch.Tensor:
 
 def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor,
           terse_train: list[dict] | None = None, terse_val: list[dict] | None = None,
-          answer_train: list[dict] | None = None, answer_val: list[dict] | None = None) -> Path:
+          answer_train: list[dict] | None = None, answer_val: list[dict] | None = None,
+          cloze_dev: list[dict] | None = None) -> Path:
     if cfg.resume:
         run_dir = Path(cfg.resume).parent
     else:
@@ -157,7 +166,16 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
                            multi_full=multi, multi_ratio=cfg.multi_full_ratio,
                            answer=answer_train, answer_ratio=cfg.answer_ratio,
                            squad_full=squad_full, squad_ratio=cfg.squad_full_ratio)
-    sampler = ClozeSampler(sampler, cfg.cloze_ratio, gen)
+    cloze_len = 2 * (eng.cfg.chunk_size + 1)
+    squad_cloze_train = squad_cloze_val = []
+    if cfg.squad_cloze_ratio > 0:
+        squad_cloze_train = squad_cloze_examples(eng.tokenizer, answer_train, cloze_len)
+        if cloze_dev or answer_val:
+            squad_cloze_val = squad_cloze_val_examples(eng.tokenizer, cloze_dev or answer_val, cloze_len)
+        if len(squad_cloze_val) % cfg.batch_size == 1:  # a last batch of 1 cannot be shuffled
+            squad_cloze_val = squad_cloze_val[:-1]
+    sampler = ClozeSampler(sampler, cfg.cloze_ratio, gen, squad_cloze_train,
+                           cfg.squad_cloze_ratio, cfg.batch_size)
     cloze_val = cloze_examples(eng, val_chunks, fallback=False) if cfg.cloze_ratio > 0 else []
     if len(cloze_val) % cfg.batch_size == 1:  # a last batch of 1 cannot be shuffled
         cloze_val = cloze_val[:-1]
@@ -174,7 +192,8 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
         for g in opt.param_groups:
             g["lr"] = lr_at(step, cfg) * g["scale"]
         opt.zero_grad()
-        total, counts = 0.0, {"full": 0, "multi": 0, "squad_full": 0, "terse": 0, "answer": 0, "cloze": 0}
+        total, counts = 0.0, {"full": 0, "multi": 0, "squad_full": 0, "terse": 0, "answer": 0, "cloze": 0,
+                                  "squad_cloze": 0}
         for _ in range(cfg.grad_accum):
             density, batch = sampler.next()
             counts[density] += 1
@@ -189,6 +208,8 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
             extra = {"encoder_lr": opt.param_groups[0]["lr"]}
         if cfg.cloze_ratio > 0:
             extra["n_cloze"] = counts["cloze"]
+        if cfg.squad_cloze_ratio > 0:
+            extra["n_squad_cloze"] = counts["squad_cloze"]
         log(step=n, train_loss=total, lr=opt.param_groups[-1]["lr"], grad_norm=gnorm,
             n_full=counts["full"], n_multi=counts["multi"], n_squad_full=counts["squad_full"], n_terse=counts["terse"],
             n_answer=counts["answer"], secs=time.time() - t0, **extra)
@@ -202,6 +223,10 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
             if len(cloze_val) >= 2:  # shuffled memory needs another example's memory
                 for c, f in CONDITIONS.items():
                     row[f"cloze_val_loss_{c}"] = _terse_val_loss(eng, cloze_val, cfg.batch_size, f)
+            if len(squad_cloze_val) >= 2:
+                for c, f in CONDITIONS.items():
+                    row[f"squad_cloze_val_loss_{c}"] = _terse_val_loss(eng, squad_cloze_val,
+                                                                       cfg.batch_size, f)
             if answer_val:
                 row["answer_val_loss"] = _terse_val_loss(eng, answer_val, cfg.batch_size)
             if cfg.val_gen_samples and answer_val:
@@ -214,12 +239,31 @@ def train(eng, cfg: Config, train_chunks: torch.Tensor, val_chunks: torch.Tensor
                 eng.train()
             log(step=n, **row)
             last_val = row
-        if n % cfg.ckpt_interval == 0 or n == cfg.steps:
+        stop = _early_stop(cfg, n, last_val if n % cfg.val_interval == 0 or n == cfg.steps else None)
+        if n % cfg.ckpt_interval == 0 or n == cfg.steps or stop:
             save_checkpoint(eng, opt, n, run_dir / f"ckpt-{n}.pt")
+        if stop:
+            (run_dir / "eval").mkdir(exist_ok=True)
+            (run_dir / "eval" / "early_stop.json").write_text(json.dumps(stop, indent=2))
+            break
     metrics.close()
     if cfg.val_gen_samples and answer_val and last_val:
         _write_gates(run_dir, last_val, load_control_result(cfg.text_qa_result))
     return run_dir
+
+
+def _early_stop(cfg: Config, n: int, row: dict | None) -> dict | None:
+    """At step cfg.early_stop_step: stop when SQuAD cloze real and zeroed val losses differ by
+    less than cfg.early_stop_gap nats (the memory is not being used for the answers)."""
+    if not cfg.early_stop_step or n != cfg.early_stop_step or not row:
+        return None
+    if "squad_cloze_val_loss_real" not in row:
+        return None
+    gap = abs(row["squad_cloze_val_loss_zeroed"] - row["squad_cloze_val_loss_real"])
+    if gap >= cfg.early_stop_gap:
+        return None
+    return {"step": n, "gap": gap, "threshold": cfg.early_stop_gap,
+            "reason": f"squad cloze real/zeroed val loss gap {gap:.3f} < {cfg.early_stop_gap} at step {n}"}
 
 
 def _squad_paragraph_examples(examples: list[dict], eos_id: int) -> list[dict]:

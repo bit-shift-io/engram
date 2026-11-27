@@ -18,4 +18,5 @@
 - **Recall gate** — answer recall threshold (25%) after the K=32 warm-up; below it the joint stage does not run.
 - **Fact token** — a chunk token inside a detected name, number or date span. Found by text patterns, not NER; not the same as an answer span.
 - **Fact weighting** — per-token reconstruction loss weight from the frozen decoder's loss on that token with zeroed memory. Detached, normalised to mean 1 per chunk.
-- **Cloze task** — training task: the decoder sees a chunk with fact spans blanked and outputs the fact spans, from memory. Answer recall, not cloze loss, measures fact retention.
+- **Cloze task** — training task: the decoder sees a chunk with spans blanked and outputs them, from memory. Spans are fact spans on WikiText, gold answer spans on SQuAD train paragraphs. Answer recall, not cloze loss, measures fact retention.
+- **Cloze recall** — share of SQuAD dev paragraphs where the decoder fills a blanked gold answer from memory, scored with real, shuffled and zeroed memory alongside the gold-answer loss. Boundary: it measures whether facts are stored. Answer recall measures whether `<full>` writes them out.

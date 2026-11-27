@@ -305,3 +305,80 @@ def test_fact_weighting_trains_with_finite_loss(tmp_path):
     run = train(eng, cfg, train_chunks, val_chunks)
     rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
     assert all(math.isfinite(r["train_loss"]) for r in rows if "train_loss" in r)
+
+
+def _squad_cloze_data(n):
+    from engram.data.qa import make_qa_example
+    tok = make_tiny_tokenizer()
+    return [make_qa_example(tok, " ".join(f"w{(i + j) % 60}" for j in range(6)),
+                            "w1", f"w{i % 60}", 8, 4, answers=[f"w{i % 60}", f"w{(i + 3) % 60}"])
+            for i in range(n)]
+
+
+def test_squad_cloze_ratio_zero_leaves_batches_unchanged_and_one_swaps_them():
+    from engram.data.cloze import ClozeSampler, squad_cloze_examples
+    from engram.data.mixed import MixedSampler
+    tr, _ = data()
+    exs = squad_cloze_examples(make_tiny_tokenizer(), _squad_cloze_data(4), 18)
+
+    def draw(ratio):
+        g = torch.Generator().manual_seed(1)
+        s = ClozeSampler(MixedSampler(tr, None, 1.0, 2, g), 0.0, g, exs, ratio, 2)
+        return [s.next() for _ in range(5)]
+    base = []
+    g = torch.Generator().manual_seed(1)
+    m = MixedSampler(tr, None, 1.0, 2, g)
+    base = [m.next() for _ in range(5)]
+    assert all(torch.equal(a[1], b[1]) for a, b in zip(draw(0.0), base))
+    assert all(d == "squad_cloze" and len(b) == 2 for d, b in draw(1.0))
+
+
+def test_tiny_run_logs_squad_cloze_val_keys(tmp_path):
+    tr, va = data()
+    qa = _squad_cloze_data(60)
+    cfg = cfg_for(tmp_path, steps=2, val_interval=2, squad_cloze_ratio=0.5, answer_ratio=0.0)
+    run = train(build(cfg), cfg, tr, va, answer_train=qa, answer_val=qa)
+    val = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()
+           if "val_loss" in l][-1]
+    for c in ("real", "shuffled", "zeroed"):
+        assert math.isfinite(val[f"squad_cloze_val_loss_{c}"])
+
+
+def test_cloze_and_squad_cloze_ratios_give_overall_shares_of_point_two_and_point_three():
+    from collections import Counter
+
+    from engram.data.cloze import ClozeSampler, make_cloze_example, squad_cloze_examples
+    from engram.data.mixed import MixedSampler
+    tr, _ = data()
+    exs = squad_cloze_examples(make_tiny_tokenizer(), _squad_cloze_data(4), 18)
+    g = torch.Generator().manual_seed(3)
+    s = ClozeSampler(MixedSampler(tr, None, 1.0, 2, g), 0.2, g, exs, 0.375, 2)
+    n = 4000
+    counts = Counter(s.next()[0] for _ in range(n))
+    assert abs(counts["cloze"] / n - 0.2) < 0.03
+    assert abs(counts["squad_cloze"] / n - 0.3) < 0.03
+    assert abs(counts["full"] / n - 0.5) < 0.03
+
+
+def test_early_stop_halts_at_step_when_squad_cloze_gap_is_small(tmp_path):
+    tr, va = data()
+    qa = _squad_cloze_data(60)
+    cfg = cfg_for(tmp_path, steps=6, val_interval=2, ckpt_interval=2, squad_cloze_ratio=0.5,
+                  early_stop_step=2, early_stop_gap=1e9)
+    run = train(build(cfg), cfg, tr, va, answer_train=qa, answer_val=qa)
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    assert max(r["step"] for r in rows) == 2
+    stop = json.loads((run / "eval" / "early_stop.json").read_text())
+    assert stop["step"] == 2 and "gap" in stop and stop["threshold"] == 1e9
+    assert (run / "ckpt-2.pt").exists()
+
+
+def test_early_stop_does_not_trigger_when_gap_is_large_enough(tmp_path):
+    tr, va = data()
+    qa = _squad_cloze_data(60)
+    cfg = cfg_for(tmp_path, steps=4, val_interval=2, ckpt_interval=2, squad_cloze_ratio=0.5,
+                  early_stop_step=2, early_stop_gap=0.0)
+    run = train(build(cfg), cfg, tr, va, answer_train=qa, answer_val=qa)
+    rows = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines()]
+    assert max(r["step"] for r in rows) == 4
+    assert not (run / "eval" / "early_stop.json").exists()

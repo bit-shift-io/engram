@@ -1,0 +1,2 @@
+{"step": 1, "train_loss": 2.6496942043304443, "lr": 0.0001, "grad_norm": 1.4650428295135498, "n_full": 1, "n_multi": 0, "n_squad_full": 0, "n_terse": 0, "n_answer": 0, "secs": 3.5685088634490967, "n_cloze": 0, "n_squad_cloze": 0}
+{"step": 2, "train_loss": 1.9639774560928345, "lr": 0.0002, "grad_norm": 1.64366614818573, "n_full": 0, "n_multi": 0, "n_squad_full": 0, "n_terse": 0, "n_answer": 0, "secs": 3.5086209774017334, "n_cloze": 1, "n_squad_cloze": 0}

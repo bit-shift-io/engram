@@ -1,0 +1,31 @@
+# SQuAD cloze continuation of fact K=16 (ckpt-3000). Launched by scripts/squad_cloze.py, which
+# overrides run_dir (and, for --smoke, step counts). Overall shares: 0.2 WikiText cloze + 0.3 SQuAD
+# cloze + 0.5 plain <full>: squad_cloze_ratio is the share of the draws left after cloze_ratio
+# (0.3 / (1 - 0.2) = 0.375).
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 16
+seed: 0
+run_dir: runs/squad_cloze/train
+init_from: runs/fact_objective/k16/20261126-212058/ckpt-3000.pt
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 2000
+val_samples: 64
+lr: 0.002
+steps: 2000
+batch_size: 4
+grad_accum: 1
+val_interval: 500
+ckpt_interval: 500
+decoder_lora: false
+decoder_memory_adapter_rank: 8
+qa_train_samples: 4000  # cached under data/cache (SQuAD train paragraphs only)
+qa_val_samples: 40
+val_recall_samples: 10
+fact_weighting: true
+cloze_ratio: 0.2
+squad_cloze_ratio: 0.375
+early_stop_step: 1000
+early_stop_gap: 0.1

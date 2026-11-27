@@ -51,6 +51,11 @@ class Config:
     fact_weight_cap: float = 5.0
     # fraction of <full> chunk batches trained as the cloze task (engram.data.cloze) instead
     cloze_ratio: float = 0.0
+    # share of the remaining <full> batches trained as SQuAD gold-answer cloze (needs answer_train)
+    squad_cloze_ratio: float = 0.0
+    # stop at this step if |squad_cloze_val_loss real - zeroed| < early_stop_gap (0 = never)
+    early_stop_step: int = 0
+    early_stop_gap: float = 0.1
     # training
     lr: float = 2e-3
     steps: int = 800  # optimizer steps

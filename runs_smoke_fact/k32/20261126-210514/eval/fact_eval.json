@@ -1,0 +1,45 @@
+{
+  "recall": {
+    "k": 32,
+    "n": 2,
+    "answer_recall": 0.0,
+    "recon_token_f1": 0.01801801801801802,
+    "length_ratio": 1.4488636363636365
+  },
+  "wikitext": {
+    "n_chunks": 2,
+    "chunk_size": 128,
+    "k": 32,
+    "compression_ratio": 4.0,
+    "real": {
+      "token_accuracy": 0.0078125,
+      "rouge_l": 0.011673151750972763
+    },
+    "zeroed": {
+      "token_accuracy": 0.01953125,
+      "rouge_l": 0.07392996108949416
+    },
+    "shuffled": {
+      "token_accuracy": 0.00390625,
+      "rouge_l": 0.007782101167315175
+    }
+  },
+  "squad": {
+    "n_chunks": 2,
+    "chunk_size": 128,
+    "k": 32,
+    "compression_ratio": 4.0,
+    "real": {
+      "token_accuracy": 0.015625,
+      "rouge_l": 0.04669260700389105
+    },
+    "zeroed": {
+      "token_accuracy": 0.015625,
+      "rouge_l": 0.0622568093385214
+    },
+    "shuffled": {
+      "token_accuracy": 0.00390625,
+      "rouge_l": 0.019455252918287938
+    }
+  }
+}

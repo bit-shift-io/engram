@@ -176,3 +176,57 @@ def fact_summary_markdown(arms: list[dict]) -> str:
     rows += ["", f"K=16 Stage 2 answer recall (reference): {FACT_STAGE2_RECALL:.3f}. "
              "Baselines: runs/20261125-090655 (K=16 Stage 1), runs/k32_wikionly/20261126-164326 (K=32)."]
     return "\n".join(rows)
+
+
+# ---- SQuAD cloze pipeline (scripts/squad_cloze.py) ----------------------------------------------
+
+SQUAD_CLOZE_RECALL_PASS = 0.15
+SQUAD_CLOZE_GAP_PASS = 1.0  # nats: zeroed answer loss - real answer loss on the cloze recall eval
+BASELINE_RUN = "runs/fact_objective/k16/20261126-212058"
+BASELINE_RECALL = 0.075  # runs/fact_objective/summary.json, K=16 arm
+
+
+def baseline_row(base_dir: str = BASELINE_RUN, recall: float = BASELINE_RECALL) -> dict:
+    """Fact K=16 ckpt-3000: answer recall and the cloze recall eval read from its run dir."""
+    cl = json.loads((Path(base_dir) / "eval" / "cloze_recall.json").read_text())
+    return {"run": base_dir, "answer_recall": recall, "cloze": cl}
+
+
+def squad_cloze_summary(run: str, recall: dict, cloze: dict, early_stop: dict | None,
+                        baseline: dict | None) -> dict:
+    """Pass = answer recall >= 0.15 AND cloze real beats zeroed answer loss by >= 1 nat; each
+    condition is reported separately."""
+    rc = recall["answer_recall"]
+    gap = cloze["zeroed"]["answer_loss"] - cloze["real"]["answer_loss"]
+    conds = {"answer_recall": {"value": rc, "threshold": SQUAD_CLOZE_RECALL_PASS,
+                               "passed": rc >= SQUAD_CLOZE_RECALL_PASS},
+             "cloze_gap": {"value": gap, "threshold": SQUAD_CLOZE_GAP_PASS,
+                           "passed": gap >= SQUAD_CLOZE_GAP_PASS}}
+    return {"run": run, "answer_recall": rc, "cloze": {c: cloze[c] for c in ("real", "shuffled", "zeroed")},
+            "cloze_n": cloze["n"], "conditions": conds, "passed": all(c["passed"] for c in conds.values()),
+            "stopped_early": early_stop is not None, "stop_reason": early_stop["reason"] if early_stop else "",
+            "baseline": baseline}
+
+
+def squad_cloze_markdown(s: dict) -> str:
+    c = s["conditions"]
+    mark = lambda ok: "PASS" if ok else "FAIL"  # noqa: E731
+    rows = ["# SQuAD cloze summary", "",
+            f"- answer recall >= {c['answer_recall']['threshold']}: {mark(c['answer_recall']['passed'])} "
+            f"({c['answer_recall']['value']:.3f})",
+            f"- cloze real beats zeroed answer loss by >= {c['cloze_gap']['threshold']} nat: "
+            f"{mark(c['cloze_gap']['passed'])} ({c['cloze_gap']['value']:.2f})",
+            f"- overall: {mark(s['passed'])}",
+            f"- stop reason: {s['stop_reason'] or 'ran all steps'}", "",
+            "| run | answer recall | cloze loss real/shuf/zero | cloze hits real/shuf/zero (of n) |",
+            "|---|---|---|---|"]
+
+    def row(name, rc, cl):
+        loss = " / ".join(f"{cl[k]['answer_loss']:.2f}" for k in ("real", "shuffled", "zeroed"))
+        hits = " / ".join(str(cl[k]["hits"]) for k in ("real", "shuffled", "zeroed"))
+        return f"| {name} | {rc:.3f} | {loss} | {hits} of {cl['n']} |"
+    b = s.get("baseline")
+    if b:
+        rows.append(row(f"fact K=16 ckpt-3000 baseline ({b['run']})", b["answer_recall"], b["cloze"]))
+    rows.append(row(f"squad cloze ({s['run']})", s["answer_recall"], {**s["cloze"], "n": s["cloze_n"]}))
+    return "\n".join(rows)
