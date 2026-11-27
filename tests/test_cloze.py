@@ -369,11 +369,11 @@ def test_select_recall_paragraphs_takes_articles_round_robin():
     assert [c["title"] for _, c in picked] == ["A", "B", "C", "A", "B"]
 
 
-def test_paragraph_recall_examples_use_whole_paragraph_and_all_answers():
+def test_paragraph_recall_examples_use_whole_paragraph_and_first_question_answers():
     from engram.eval.cloze_recall import paragraph_recall_examples, select_recall_paragraphs
     tok = fact_tokenizer()
     picked = select_recall_paragraphs(tok, _dev(tok), max_len=64)
     exs = paragraph_recall_examples(picked)
     assert len(exs) == len(picked)
     assert torch.equal(exs[0]["chunks"], picked[0][0]["chunks"])
-    assert exs[0]["answers"] == ["42", "March 1999"]
+    assert exs[0]["answers"] == ["42"]  # first question only, not every question's answers

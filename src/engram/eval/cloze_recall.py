@@ -68,9 +68,10 @@ def select_recall_paragraphs(tokenizer, examples: list[dict], max_len: int,
 
 
 def paragraph_recall_examples(picked: list[tuple[dict, dict]]) -> list[dict]:
-    """Answer recall examples for the selected paragraphs: the whole paragraph, every gold answer of
-    every question on it, so answer recall and cloze recall score the same paragraphs."""
-    return [{"chunks": src["chunks"], "answers": c["answers"]} for src, c in picked]
+    """Answer recall examples for the selected paragraphs: the whole paragraph and one question's
+    gold answers (the paragraph's first question), so answer recall and cloze recall score the same
+    paragraphs. Pooling every question's answers inflates recall: any of ~6 answers counts."""
+    return [{"chunks": src["chunks"], "answers": src["answers"]} for src, _ in picked]
 
 
 def other_article_pool(examples: list[dict], exclude_titles: set[str], n: int = N_PARAGRAPHS) -> list[dict]:
