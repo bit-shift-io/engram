@@ -30,3 +30,12 @@ def test_evaluate_recall_metrics_in_range_and_report(tiny_engram, tmp_path):
     path = write_recall_report(tmp_path, res)
     assert json.loads(path.read_text())["n"] == 2
     assert (tmp_path / "eval" / "recall.md").exists()
+
+
+def test_answer_in_text_requires_word_boundaries():
+    from engram.eval.recall import answer_in_text
+
+    assert not answer_in_text(["2"], "2015")
+    assert answer_in_text(["2"], "2 sacks")
+    assert answer_in_text(["Cam Newton"], "cam newton won")
+    assert answer_in_text(["$5 million"], "paid $5 million.")

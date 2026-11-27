@@ -5,6 +5,8 @@ import re
 
 import torch
 
+from engram.eval.qa import find_word_bounded
+
 MONTHS = {"January", "February", "March", "April", "May", "June", "July", "August",
           "September", "October", "November", "December"}
 BLANK, SEP, JOIN = "___", "\nAnswers:", " | "
@@ -50,7 +52,7 @@ def make_cloze_example(tokenizer, chunk_ids: torch.Tensor, max_len: int) -> dict
     return _layout(tokenizer, chunk_ids, text, spans, max_len)
 
 
-def _layout(tokenizer, chunk_ids, text, spans, max_len):
+def _layout(tokenizer, chunk_ids, text, spans, max_len, blanks=None):
     parts, prev = [], 0
     for s, e in spans:
         parts += [text[prev:s], BLANK]
@@ -61,8 +63,11 @@ def _layout(tokenizer, chunk_ids, text, spans, max_len):
     a = tokenizer(answer, add_special_tokens=False).input_ids + [tokenizer.eos_token_id]
     a = a[: max(1, max_len // 2) if len(q) + len(a) > max_len else len(a)]
     q = q[: max_len - len(a)]
-    return {"chunks": chunk_ids.reshape(1, -1), "question": torch.tensor(q, dtype=torch.long),
-            "target": torch.tensor(a, dtype=torch.long), "density": "full"}
+    out = {"chunks": chunk_ids.reshape(1, -1), "question": torch.tensor(q, dtype=torch.long),
+           "target": torch.tensor(a, dtype=torch.long), "density": "full"}
+    if blanks is not None:
+        out["blanks"] = blanks
+    return out
 
 
 def paragraph_answers(examples: list[dict]) -> list[tuple[torch.Tensor, list[str]]]:
@@ -79,13 +84,14 @@ def make_gold_cloze_example(tokenizer, chunk_ids: torch.Tensor, answers: list[st
                             max_len: int) -> dict | None:
     """Cloze example whose blanks are SQuAD gold answers found in the (EOS-stripped) chunk, in text
     order; answers not in the chunk are dropped, None if none remain. Same layout as
-    `make_cloze_example`."""
+    `make_cloze_example`, plus `blanks`: per blank, its accepted answer strings."""
     ids = chunk_ids.tolist()
     while ids and ids[-1] == tokenizer.eos_token_id:
         ids.pop()
     text = tokenizer.decode(ids, skip_special_tokens=True)
-    found = sorted({(i, i + len(a)) for a in set(answers) if a.strip()
-                    for i in [text.find(a)] if i >= 0})
+    located = {(i, i + len(a)): a for a in set(answers) if a.strip()
+               for i in [find_word_bounded(a, text)] if i >= 0}
+    found = sorted(located)
     spans: list[tuple[int, int]] = []
     for s, e in found:
         if spans and s < spans[-1][1]:
@@ -94,7 +100,9 @@ def make_gold_cloze_example(tokenizer, chunk_ids: torch.Tensor, answers: list[st
             spans.append((s, e))
     if not spans:
         return None
-    return _layout(tokenizer, chunk_ids, text, spans, max_len)  # memory keeps the full chunk
+    blanks = [sorted({a for (s, e), a in located.items() if s >= bs and e <= be})
+              for bs, be in spans]  # accepted strings per blank; merged variants share one
+    return _layout(tokenizer, chunk_ids, text, spans, max_len, blanks)  # memory keeps the full chunk
 
 
 def squad_cloze_examples(tokenizer, examples: list[dict], max_len: int,

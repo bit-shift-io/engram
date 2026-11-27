@@ -86,3 +86,63 @@ def test_rerun_resumes_from_state(tmp_path):
     calls.clear()
     p.run_pipeline(tmp_path, runners, BASE)
     assert calls == []
+
+
+def test_markdown_renders_new_cloze_output_without_hits(tmp_path):
+    from engram.eval.report import squad_cloze_markdown, squad_cloze_summary
+    new = {"n": 40, **{k: {"blanks": 10, "cloze_recall": 0.3, "aligned_recall": 0.2, "answer_loss": 3.0}
+                       for k in ("real", "shuffled", "zeroed")}}
+    s = squad_cloze_summary("r", {"answer_recall": 0.2}, new, None, {"run": "b", "answer_recall": 0.1, "cloze": new})
+    md = squad_cloze_markdown(s)
+    assert "0.30" in md and "0.20" in md
+
+
+# ---- rescore ------------------------------------------------------------------------------------
+
+RESCORE = Path(__file__).resolve().parents[1] / "scripts" / "rescore_cloze.py"
+
+
+def load_rescore():
+    spec = importlib.util.spec_from_file_location("rescore_cloze", RESCORE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def rs_result(recall, real, zeroed):
+    return {"recall": {"answer_recall": recall},
+            "cloze": {"real": {"answer_loss": real}, "zeroed": {"answer_loss": zeroed}}}
+
+
+OLD = {"base": {"answer_recall": 0.075, "gap": 1.0}, "new": {"answer_recall": 0.2, "gap": 1.7}}
+
+
+def run_rescore(tmp_path, base, new):
+    p = load_rescore()
+    results = {"base": base, "new": new}
+    p.run_rescore(tmp_path, {"eval": lambda pdir, name, run: results[name]}, {"base": "rb", "new": "rn"}, OLD)
+    return json.loads((tmp_path / "summary.json").read_text())
+
+
+def test_rescore_pass(tmp_path):
+    s = run_rescore(tmp_path, rs_result(0.1, 3.0, 4.0), rs_result(0.25, 2.0, 4.0))
+    assert s["rule"]["answer_recall"]["passed"] and s["rule"]["gap"]["passed"] and s["passed"]
+    assert s["checkpoints"]["base"]["old"]["answer_recall"] == 0.075
+    assert s["checkpoints"]["new"]["rescored"]["gap"] == 2.0
+    assert "0.075" in (tmp_path / "summary.md").read_text()
+
+
+def test_rescore_fail_on_recall(tmp_path):
+    s = run_rescore(tmp_path, rs_result(0.1, 3.0, 4.0), rs_result(0.15, 2.0, 4.0))
+    assert not s["rule"]["answer_recall"]["passed"] and s["rule"]["gap"]["passed"] and not s["passed"]
+
+
+def test_rescore_fail_on_gap(tmp_path):
+    s = run_rescore(tmp_path, rs_result(0.1, 3.0, 4.0), rs_result(0.25, 3.5, 4.0))
+    assert s["rule"]["answer_recall"]["passed"] and not s["rule"]["gap"]["passed"]
+
+
+def test_rescore_zero_baseline_is_undefined_not_pass(tmp_path):
+    s = run_rescore(tmp_path, rs_result(0.0, 3.0, 4.0), rs_result(0.25, 2.0, 4.0))
+    assert s["rule"]["answer_recall"]["passed"] is None and not s["passed"]
+    assert "undefined" in (tmp_path / "summary.md").read_text()

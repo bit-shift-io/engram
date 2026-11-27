@@ -201,13 +201,159 @@ def test_evaluate_cloze_recall_hit_rate_and_loss_per_condition():
     from engram.eval.cloze_recall import evaluate_cloze_recall
     tok = fact_tokenizer()
     exs = [{"chunks": ids(tok, t)[None], "question": ids(tok, "the ___ Answers:"), "density": "full",
-            "answers": [a]} for t, a in [("March w3", "42"), ("Notre w4", "Dame"), ("42 w5", "records"),
+            "answers": [a], "blanks": [[a]], "title": t} for t, a in [("March w3", "42"), ("Notre w4", "Dame"), ("42 w5", "records"),
                                          ("Dame w6", "1999")]]
     # memory id -> generated text; real memory answers right in first segment for 2 of 4
     outs = {int(exs[0]["chunks"][0, 0]): "42 | w1", int(exs[1]["chunks"][0, 0]): "Dame | w1",
             int(exs[2]["chunks"][0, 0]): "w1 | records", int(exs[3]["chunks"][0, 0]): "w1"}
     r = evaluate_cloze_recall(StubEng(tok, outs), exs, batch_size=4)
-    assert r["real"]["hits"] == 2 and r["real"]["hit_rate"] == 0.5 and r["n"] == 4
-    assert r["shuffled"]["hits"] == 0  # shifted memory yields the neighbour's text
-    assert r["zeroed"]["hits"] == 0
+    assert r["real"]["cloze_recall"] == 0.5 and r["real"]["aligned_recall"] == 0.5 and r["n"] == 4
+    assert "hits" not in r["real"]
+    assert r["shuffled"]["cloze_recall"] == 0  # shifted memory yields the neighbour's text
+    assert r["zeroed"]["cloze_recall"] == 0
     assert r["real"]["answer_loss"] < r["shuffled"]["answer_loss"] < r["zeroed"]["answer_loss"]
+
+
+def test_find_word_bounded_skips_inside_words_and_keeps_edge_punctuation():
+    from engram.eval.qa import find_word_bounded
+
+    assert find_word_bounded("L", "League of L") == 10
+    assert find_word_bounded("5", "50 and 5") == 7
+    assert find_word_bounded("2", "2 sacks") == 0
+    assert find_word_bounded("Levi's Stadium.", "at Levi's Stadium. Then") == 3
+    assert find_word_bounded("$5 million", "cost $5 million") == 5
+    assert find_word_bounded("L", "League") == -1
+
+
+def _titled(tok, titles):
+    starts = ["March", "Notre", "42", "Dame", "1999", "records"]
+    return [{"chunks": ids(tok, f"{starts[i]} w{i + 3}")[None], "question": ids(tok, "the ___ Answers:"),
+             "density": "full", "answers": ["w20"], "blanks": [["w20"]], "title": t} for i, t in enumerate(titles)]
+
+
+def test_cloze_recall_shuffled_memory_always_crosses_articles():
+    from engram.eval.cloze_recall import evaluate_cloze_recall
+    tok = fact_tokenizer()
+    exs = _titled(tok, ["A", "A", "A", "B", "B", "C"])
+
+    class Spy(StubEng):
+        def generate(self, mem, ctrl, n, eos, question_ids=None):
+            self.seen.append(round(float(mem.flatten()[0])))
+            return super().generate(mem, ctrl, n, eos, question_ids)
+
+        def terse_loss(self, examples, memory_transform=None):
+            mem = torch.cat([self.encode(e["chunks"].reshape(1, -1)) for e in examples])
+            m = mem if memory_transform is None else memory_transform(mem)
+            self.batches.append((examples, m))
+            return torch.tensor(1.0)
+
+    eng = Spy(tok, {})
+    eng.batches = []
+    evaluate_cloze_recall(eng, exs, batch_size=2)
+    title_of = {int(e["chunks"][0, 0]): e["title"] for e in exs}
+    from engram.eval.ablation import CONDITIONS
+    pos = list(CONDITIONS).index("shuffled")
+    shuffled_gen = eng.seen[pos * len(exs) : (pos + 1) * len(exs)]
+    assert all(title_of[m] != e["title"] for m, e in zip(shuffled_gen, exs))
+    n_batches = len(eng.batches) // len(CONDITIONS)
+    for b, m in eng.batches[pos * n_batches : (pos + 1) * n_batches]:
+        assert all(title_of[round(float(r.flatten()[0]))] != e["title"] for r, e in zip(m, b))
+
+
+def test_cloze_recall_single_article_borrows_shuffled_memory_from_pool():
+    from engram.eval.ablation import CONDITIONS
+    from engram.eval.cloze_recall import evaluate_cloze_recall
+    tok = fact_tokenizer()
+    titled = _titled(tok, ["A", "A", "A", "B", "C", "B"])
+    exs, pool = titled[:3], titled[3:]
+
+    class Spy(StubEng):
+        def generate(self, mem, ctrl, n, eos, question_ids=None):
+            self.seen.append(round(float(mem.flatten()[0])))
+            return super().generate(mem, ctrl, n, eos, question_ids)
+
+    eng = Spy(tok, {})
+    result = evaluate_cloze_recall(eng, exs, shuffle_pool=pool)
+    assert result["n"] == 3
+    pool_firsts = {int(p["chunks"][0, 0]) for p in pool}
+    pos = list(CONDITIONS).index("shuffled")
+    assert set(eng.seen[pos * 3 : (pos + 1) * 3]) <= pool_firsts
+
+
+def test_cloze_recall_single_article_raises():
+    import pytest
+    from engram.eval.cloze_recall import evaluate_cloze_recall
+    tok = fact_tokenizer()
+    with pytest.raises(ValueError, match="article"):
+        evaluate_cloze_recall(StubEng(tok, {}), _titled(tok, ["A", "A", "A"]))
+
+
+def test_cloze_recall_crosses_articles_when_one_article_dominates():
+    from engram.eval.cloze_recall import cross_article_partners
+    titles = ["A"] * 5 + ["B"]
+    p = cross_article_partners(titles)
+    assert all(titles[j] != t for j, t in zip(p, titles))
+
+
+def test_select_recall_paragraphs_carries_title():
+    from engram.eval.cloze_recall import select_recall_paragraphs
+    tok = fact_tokenizer()
+    dev = [{**d, "title": f"T{i}"} for i, d in enumerate(_dev(tok))]
+    assert [c["title"] for _, c in select_recall_paragraphs(tok, dev, max_len=64)] == ["T0", "T3", "T4"]
+
+
+def test_load_qa_examples_keeps_title_under_new_cache_key(tmp_path, monkeypatch):
+    import sys, types
+    from engram.config import Config
+    from engram.data.qa import load_qa_examples
+    tok = fact_tokenizer()
+    rows = [{"title": "Super_Bowl_50", "context": "the band played in March 1999", "question": "the w3",
+             "answers": {"text": ["March 1999"], "answer_start": [19]}}]
+    fake = types.ModuleType("datasets")
+    fake.load_dataset = lambda *a, **k: iter(rows)
+    monkeypatch.setitem(sys.modules, "datasets", fake)
+    cfg = Config(data_cache=str(tmp_path), chunk_size=16, max_chunks=2)
+    old_key = f"{cfg.qa_dataset}-validation-{cfg.model_name}-16-2-1-ans"
+    import hashlib
+    torch.save([{"old": True}], tmp_path / (hashlib.md5(old_key.encode()).hexdigest()[:12] + ".pt"))
+    out = load_qa_examples(cfg, tok, "validation", 1, with_title=True)
+    assert out[0]["title"] == "Super_Bowl_50"
+
+
+def test_load_qa_examples_without_title_reads_old_cache(tmp_path):
+    from engram.config import Config
+    from engram.data.qa import load_qa_examples
+    import hashlib
+    cfg = Config(data_cache=str(tmp_path), chunk_size=16, max_chunks=2)
+    old_key = f"{cfg.qa_dataset}-validation-{cfg.model_name}-16-2-200-ans"
+    torch.save([{"old": True}], tmp_path / (hashlib.md5(old_key.encode()).hexdigest()[:12] + ".pt"))
+    assert load_qa_examples(cfg, fact_tokenizer(), "validation", 200) == [{"old": True}]
+
+
+def test_gold_cloze_keeps_blanks_in_order_with_merged_variants():
+    from engram.data.cloze import make_gold_cloze_example
+    tok = fact_tokenizer()
+    text = "the band played in March 1999 at Notre Dame . They sold 42 records"
+    ex = make_gold_cloze_example(tok, qa_ex(tok, text, [])["chunks"][0],
+                                 ["42", "March 1999", "March", "Notre Dame"], 64)
+    assert ex["blanks"] == [["March", "March 1999"], ["Notre Dame"], ["42"]]
+
+
+def test_score_blanks_order_free_recall_vs_aligned_and_extras_ignored():
+    from engram.eval.cloze_recall import score_blanks
+    blanks = [["42"], ["Dame"]]
+    assert score_blanks(blanks, "Dame | 42") == (2, 0)
+    assert score_blanks(blanks, "42 | Dame") == (2, 2)
+    assert score_blanks(blanks, "w1 | 42 | Dame") == (1, 0)  # third segment ignored
+    assert score_blanks([["42"], ["42"]], "42 | w1") == (1, 1)  # one segment, one blank
+    assert score_blanks([["42"], ["Dame", "42"]], "42 | w1") == (1, 1)
+    assert score_blanks([["Dame", "42"], ["42"]], "42 | Dame") == (2, 1)  # needs re-assignment
+
+
+def test_other_article_pool_takes_distinct_paragraphs_from_other_articles():
+    from engram.eval.cloze_recall import other_article_pool
+    tok = fact_tokenizer()
+    exs = _titled(tok, ["A", "B", "B", "C", "C"])
+    exs[2] = {**exs[1]}  # same paragraph twice (two questions)
+    pool = other_article_pool(exs, {"A"}, n=2)
+    assert [p["title"] for p in pool] == ["B", "C"]

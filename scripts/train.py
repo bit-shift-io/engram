@@ -47,7 +47,7 @@ def main(argv=None) -> None:
     if cfg.answer_ratio > 0 or cfg.val_recall_samples > 0:
         answer_val = load_qa_examples(cfg, tok, "validation", cfg.qa_val_samples)
     if cfg.squad_cloze_ratio > 0:  # the cloze recall eval picks its 40 paragraphs from these
-        cloze_dev = load_qa_examples(cfg, tok, "validation", CLOZE_DEV_SAMPLES)
+        cloze_dev = load_qa_examples(cfg, tok, "validation", CLOZE_DEV_SAMPLES, with_title=True)
     eng = Engram(model, tok, cfg)
     print("run dir:", train(eng, cfg, train_chunks, val_chunks, terse_train, terse_val,
                             answer_train, answer_val, cloze_dev))

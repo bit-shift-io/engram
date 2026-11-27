@@ -218,15 +218,61 @@ def squad_cloze_markdown(s: dict) -> str:
             f"{mark(c['cloze_gap']['passed'])} ({c['cloze_gap']['value']:.2f})",
             f"- overall: {mark(s['passed'])}",
             f"- stop reason: {s['stop_reason'] or 'ran all steps'}", "",
-            "| run | answer recall | cloze loss real/shuf/zero | cloze hits real/shuf/zero (of n) |",
+            "| run | answer recall | cloze loss real/shuf/zero | cloze recall (aligned) real/shuf/zero |",
             "|---|---|---|---|"]
 
     def row(name, rc, cl):
         loss = " / ".join(f"{cl[k]['answer_loss']:.2f}" for k in ("real", "shuffled", "zeroed"))
-        hits = " / ".join(str(cl[k]["hits"]) for k in ("real", "shuffled", "zeroed"))
-        return f"| {name} | {rc:.3f} | {loss} | {hits} of {cl['n']} |"
+        if "hits" in cl["real"]:  # old output: raw hit counts
+            hits = " / ".join(str(cl[k]["hits"]) for k in ("real", "shuffled", "zeroed")) + f" of {cl['n']}"
+        else:
+            hits = " / ".join(f"{cl[k]['cloze_recall']:.2f} ({cl[k]['aligned_recall']:.2f})"
+                              for k in ("real", "shuffled", "zeroed"))
+        return f"| {name} | {rc:.3f} | {loss} | {hits} |"
     b = s.get("baseline")
     if b:
         rows.append(row(f"fact K=16 ckpt-3000 baseline ({b['run']})", b["answer_recall"], b["cloze"]))
     rows.append(row(f"squad cloze ({s['run']})", s["answer_recall"], {**s["cloze"], "n": s["cloze_n"]}))
+    return "\n".join(rows)
+
+
+RESCORE_FACTOR = 2.0
+
+
+def _ratio_rule(new: float, base: float) -> dict:
+    """new >= 2x base; undefined (passed None) when the baseline is 0 or negative."""
+    if base <= 0:
+        return {"new": new, "baseline": base, "threshold": None, "passed": None}
+    return {"new": new, "baseline": base, "threshold": RESCORE_FACTOR * base, "passed": new >= RESCORE_FACTOR * base}
+
+
+def _score(result: dict) -> dict:
+    cl = result["cloze"]
+    return {"answer_recall": result["recall"]["answer_recall"],
+            "gap": cl["zeroed"]["answer_loss"] - cl["real"]["answer_loss"]}
+
+
+def rescore_summary(old: dict, rescored: dict) -> dict:
+    """old: {name: {answer_recall, gap}}; rescored: {name: eval result}. Relative pass rule: the
+    'new' checkpoint needs answer recall and real-vs-zeroed loss gap each >= 2x the 'base' ones."""
+    new_scores = {k: _score(v) for k, v in rescored.items()}
+    rule = {"answer_recall": _ratio_rule(new_scores["new"]["answer_recall"], new_scores["base"]["answer_recall"]),
+            "gap": _ratio_rule(new_scores["new"]["gap"], new_scores["base"]["gap"])}
+    return {"checkpoints": {k: {"old": old[k], "rescored": new_scores[k], "cloze": rescored[k]["cloze"]}
+                            for k in rescored},
+            "rule": rule, "passed": all(r["passed"] is True for r in rule.values())}
+
+
+def rescore_markdown(s: dict) -> str:
+    def mark(r):
+        return "undefined (baseline <= 0)" if r["passed"] is None else "PASS" if r["passed"] else "FAIL"
+    rows = ["# Cloze re-score", "",
+            f"- answer recall >= 2x baseline: {mark(s['rule']['answer_recall'])}",
+            f"- real-minus-zeroed loss gap >= 2x baseline: {mark(s['rule']['gap'])}",
+            f"- overall: {'PASS' if s['passed'] else 'FAIL'}", "",
+            "| checkpoint | old answer recall | re-scored answer recall | old gap | re-scored gap |",
+            "|---|---|---|---|---|"]
+    for name, c in s["checkpoints"].items():
+        rows.append(f"| {name} | {c['old']['answer_recall']:.3f} | {c['rescored']['answer_recall']:.3f} | "
+                    f"{c['old']['gap']:.2f} | {c['rescored']['gap']:.2f} |")
     return "\n".join(rows)

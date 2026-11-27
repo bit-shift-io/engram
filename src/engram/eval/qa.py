@@ -15,6 +15,15 @@ from engram.model.base import generate
 CONDITIONS = ("real", "shuffled", "zeroed")
 
 
+def find_word_bounded(needle: str, text: str) -> int:
+    """Index of the first occurrence of `needle` in `text` not preceded or followed by an
+    alphanumeric character, else -1. Look-arounds (not `\\b`) so edge punctuation still matches."""
+    if not needle:
+        return -1
+    m = re.search(r"(?<![^\W_])" + re.escape(needle) + r"(?![^\W_])", text)
+    return m.start() if m else -1
+
+
 def normalize(s: str) -> str:
     """SQuAD v1.1 normalisation: lowercase, drop punctuation and articles, squeeze whitespace."""
     s = s.lower()

@@ -6,13 +6,13 @@ from pathlib import Path
 
 import torch
 
-from engram.eval.qa import f1_score, normalize
+from engram.eval.qa import f1_score, find_word_bounded, normalize
 
 
 def answer_in_text(answers: list[str], text: str) -> bool:
-    """True if any non-empty normalised gold answer is a substring of the normalised text."""
+    """True if any non-empty normalised gold answer occurs on word boundaries in the normalised text."""
     t = normalize(text)
-    return any(a and a in t for a in map(normalize, answers))
+    return any(find_word_bounded(a, t) >= 0 for a in map(normalize, answers))
 
 
 @torch.no_grad()
@@ -43,9 +43,9 @@ def recall_markdown(results: list[dict]) -> str:
     return "\n".join(rows)
 
 
-def write_recall_report(run_dir, result: dict) -> Path:
-    d = Path(run_dir) / "eval"
-    d.mkdir(exist_ok=True)
+def write_recall_report(run_dir, result: dict, eval_dir: str = "eval") -> Path:
+    d = Path(run_dir) / eval_dir
+    d.mkdir(parents=True, exist_ok=True)
     (d / "recall.json").write_text(json.dumps(result, indent=2))
     (d / "recall.md").write_text(recall_markdown([result]) + "\n")
     return d / "recall.json"

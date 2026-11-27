@@ -15,7 +15,8 @@ from engram.data.reconstruction import load_chunks
 from engram.data.qa import load_qa_examples
 from engram.data.compression import load_terse_examples
 from engram.eval.cloze_recall import (CLOZE_DEV_SAMPLES, cloze_recall_markdown, evaluate_cloze_recall,
-                                       select_recall_paragraphs, write_cloze_recall_report)
+                                       other_article_pool, select_recall_paragraphs,
+                                       write_cloze_recall_report)
 from engram.eval.density import density_markdown, evaluate_density, write_density_report
 from engram.eval.reconstruct import evaluate_reconstruction
 from engram.eval.qa import evaluate_qa, qa_markdown, write_qa_report
@@ -38,6 +39,7 @@ def main(argv=None) -> None:
     ap.add_argument("--run", "--runs", dest="runs", nargs="+", required=True)
     ap.add_argument("--suite", default="reconstruction", choices=["reconstruction", "density", "qa", "recall", "cloze"])
     ap.add_argument("--n", type=int, default=0, help="held-out chunks (default cfg.val_samples)")
+    ap.add_argument("--eval-dir", default="eval", help="recall/cloze reports go to <run>/<eval-dir> (default eval)")
     ap.add_argument("--qa", action="store_true", help="same as --suite qa")
     args = ap.parse_args(argv)
     if args.qa:
@@ -64,16 +66,18 @@ def main(argv=None) -> None:
             eng = Engram(model, tok, cfg)
             load_checkpoint(eng, latest_checkpoint(run))
             result = evaluate_recall(eng, examples)
-            write_recall_report(run, result)
+            write_recall_report(run, result, args.eval_dir)
             results.append(result)
             continue
         if args.suite == "cloze":
-            dev = load_qa_examples(cfg, tok, "validation", CLOZE_DEV_SAMPLES)  # cached
+            dev = load_qa_examples(cfg, tok, "validation", CLOZE_DEV_SAMPLES, with_title=True)  # cached
             picked = select_recall_paragraphs(tok, dev, 2 * (cfg.chunk_size + 1), args.n or 40)
             eng = Engram(model, tok, cfg)
             load_checkpoint(eng, latest_checkpoint(run))
-            result = evaluate_cloze_recall(eng, [c for _, c in picked])
-            write_cloze_recall_report(run, result)
+            cloze = [c for _, c in picked]
+            pool = other_article_pool(dev, {c["title"] for c in cloze}, len(cloze))
+            result = evaluate_cloze_recall(eng, cloze, shuffle_pool=pool)
+            write_cloze_recall_report(run, result, args.eval_dir)
             results.append(result)
             continue
         if args.suite == "density":
