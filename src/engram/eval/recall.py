@@ -20,25 +20,29 @@ def evaluate_recall(eng, examples: list[dict]) -> dict:
     """examples need chunks and answers. Generation goes through Engram.generate (memory hooks on)."""
     eng.eval()
     tok = eng.tokenizer
-    hits, f1s, ratios = 0, [], []
+    hits, zeroed_hits, f1s, ratios = 0, 0, [], []
     for ex in examples:
         ids = ex["chunks"].flatten().tolist()
         ctx = tok.decode(ids, skip_special_tokens=True)
         rec = eng.generate(ctx, "full")
         hits += answer_in_text(ex["answers"], rec)
+        # control: how often the answer appears with no memory at all (guessing from the decoder alone)
+        zeroed_hits += answer_in_text(ex["answers"], eng.generate(ctx, "full", memory_transform=torch.zeros_like))
         f1s.append(f1_score(rec, [ctx]))
         n_ctx = len(tok(ctx, add_special_tokens=False).input_ids)
         n_rec = len(tok(rec, add_special_tokens=False).input_ids)
         ratios.append(n_rec / max(n_ctx, 1))
     n = len(examples)
-    return {"k": eng.cfg.k, "n": n, "answer_recall": hits / n,
+    return {"k": eng.cfg.k, "n": n, "answer_recall": hits / n, "zeroed_answer_recall": zeroed_hits / n,
             "recon_token_f1": sum(f1s) / n, "length_ratio": sum(ratios) / n}
 
 
 def recall_markdown(results: list[dict]) -> str:
-    rows = ["| K | n | answer recall | recon token F1 | length ratio |", "|---|---|---|---|---|"]
+    rows = ["| K | n | answer recall | zeroed answer recall | recon token F1 | length ratio |",
+            "|---|---|---|---|---|---|"]
     for r in results:
-        rows.append(f"| {r['k']} | {r['n']} | {r['answer_recall']:.3f} | "
+        z = r.get("zeroed_answer_recall")
+        rows.append(f"| {r['k']} | {r['n']} | {r['answer_recall']:.3f} | {'n/a' if z is None else f'{z:.3f}'} | "
                     f"{r['recon_token_f1']:.3f} | {r['length_ratio']:.3f} |")
     return "\n".join(rows)
 

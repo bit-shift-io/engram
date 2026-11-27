@@ -109,9 +109,9 @@ def load_rescore():
     return mod
 
 
-def rs_result(recall, real, zeroed, cloze=0.0, aligned=0.0):
+def rs_result(recall, real, zeroed, cloze=0.0, aligned=0.0, zeroed_recall=0.0):
     cond = lambda loss, c=0.0, a=0.0: {"answer_loss": loss, "cloze_recall": c, "aligned_recall": a}  # noqa: E731
-    return {"recall": {"answer_recall": recall},
+    return {"recall": {"answer_recall": recall, "zeroed_answer_recall": zeroed_recall},
             "cloze": {"real": cond(real, cloze, aligned), "shuffled": cond(5.0), "zeroed": cond(zeroed)}}
 
 
@@ -153,3 +153,10 @@ def test_rescore_markdown_shows_cloze_and_aligned_recall_per_checkpoint(tmp_path
     run_rescore(tmp_path, rs_result(0.1, 3.0, 4.0, 0.041, 0.023), rs_result(0.25, 2.0, 4.0, 0.188, 0.056))
     md = (tmp_path / "summary.md").read_text()
     assert "aligned recall" in md and "0.188" in md and "0.056" in md and "0.041" in md
+
+
+def test_rescore_reports_zeroed_answer_recall(tmp_path):
+    s = run_rescore(tmp_path, rs_result(0.175, 3.0, 4.0, zeroed_recall=0.125), rs_result(0.175, 2.0, 4.0, zeroed_recall=0.05))
+    assert s["checkpoints"]["base"]["rescored"]["zeroed_answer_recall"] == 0.125
+    md = (tmp_path / "summary.md").read_text()
+    assert "zeroed answer recall" in md and "0.125" in md and "0.050" in md

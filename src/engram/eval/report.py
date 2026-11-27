@@ -249,6 +249,7 @@ def _ratio_rule(new: float, base: float) -> dict:
 def _score(result: dict) -> dict:
     cl = result["cloze"]
     return {"answer_recall": result["recall"]["answer_recall"],
+            "zeroed_answer_recall": result["recall"].get("zeroed_answer_recall"),
             "gap": cl["zeroed"]["answer_loss"] - cl["real"]["answer_loss"]}
 
 
@@ -270,10 +271,12 @@ def rescore_markdown(s: dict) -> str:
             f"- answer recall >= 2x baseline: {mark(s['rule']['answer_recall'])}",
             f"- real-minus-zeroed loss gap >= 2x baseline: {mark(s['rule']['gap'])}",
             f"- overall: {'PASS' if s['passed'] else 'FAIL'}", "",
-            "| checkpoint | old answer recall | re-scored answer recall | old gap | re-scored gap |",
-            "|---|---|---|---|---|"]
+            "| checkpoint | old answer recall | re-scored answer recall | zeroed answer recall | old gap | re-scored gap |",
+            "|---|---|---|---|---|---|"]
     for name, c in s["checkpoints"].items():
+        z = c["rescored"].get("zeroed_answer_recall")
         rows.append(f"| {name} | {c['old']['answer_recall']:.3f} | {c['rescored']['answer_recall']:.3f} | "
+                    f"{'n/a' if z is None else f'{z:.3f}'} | "
                     f"{c['old']['gap']:.2f} | {c['rescored']['gap']:.2f} |")
     conds = ("real", "shuffled", "zeroed")
     rows += ["", "Cloze recall (aligned recall), re-scored:", "",

@@ -95,8 +95,11 @@ class Engram(nn.Module):
         return torch.tensor([ids])
 
     @torch.no_grad()
-    def generate(self, text: str, density: str = "full", max_new_tokens: int | None = None) -> str:
+    def generate(self, text: str, density: str = "full", max_new_tokens: int | None = None,
+                 memory_transform=None) -> str:
         memory = self.encode(self.tokenize_chunks(text))
+        if memory_transform is not None:  # memory-necessity eval, e.g. zeroed memory
+            memory = memory_transform(memory)
         n = max_new_tokens or memory.shape[1] // self.cfg.k * self.cfg.chunk_size + 1
         out = self.decoder.generate(memory, self._control(density, 1), n, self.eos_id)
         return self.tokenizer.decode(out, skip_special_tokens=True)
