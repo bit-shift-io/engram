@@ -5,3 +5,12 @@ runs/
 .pytest_cache/
 .hf/
 data/cache/
+
+# smoke-run output (scripts' --smoke default dirs) and logs
+runs_smoke*/
+runs_smoke*.log
+*.log
+
+# local Claude Code state
+.claude/settings.local.json
+.claude/.cc-writes

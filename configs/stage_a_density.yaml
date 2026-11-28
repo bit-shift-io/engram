@@ -1,0 +1,58 @@
+# Stage A (density stage): Stage 2-style <full>/<terse> mix with control vectors, from the SQuAD cloze
+# checkpoint, with WikiText cloze + SQuAD cloze replay so cloze recall (the fact gate) is kept.
+# Run: .venv/bin/python scripts/train.py --config configs/stage_a_density.yaml \
+#        --init-from runs/squad_cloze/train/20261127-163240/ckpt-2000.pt
+# The init checkpoint has no control vectors and no decoder LoRA; both start at their zero/no-op
+# init (load_checkpoint allows only those keys to be missing).
+# Intended share of micro-batches (tests/test_trainer.py checks these):
+#   30% <terse> XSum | 25% whole-article <full> XSum (multi-chunk memory) | 10% <full> SQuAD paragraph
+#   15% 1-chunk <full> WikiText | 10% WikiText cloze | 10% SQuAD gold-answer cloze
+#   <full> is replayed on XSum articles and SQuAD paragraphs (docs/memory/prefix-control-token-ignored.md).
+#   full_ratio 0.7; squad_full_ratio 0.1/0.7; multi_full_ratio 0.25/0.6;
+#   1-chunk pool 0.35: cloze_ratio 0.1/0.35, squad_cloze_ratio 0.1/0.25 of what remains.
+# LRs as Stage 2: decoder LoRA 3e-4, encoder side + memory adapter x 0.33 ~ 1e-4
+# (docs/memory/decoder-ignores-memory.md). Memory is read through the memory-only adapter (rank 8).
+# Budget (Stage 2/3 timings, Intel CPU): 1-chunk <full> / cloze / SQuAD cloze ~4 s, SQuAD paragraph
+#   <full> ~6 s, <terse> ~7 s, whole-article <full> ~24 s -> ~10 s per micro-batch, x grad_accum 2
+#   ~20 s per step. 500 steps ~ 2.8 h, + 6 vals (losses, SQuAD cloze x3 conditions on 100, recall
+#   on 10) ~ 5 min each ~ 30 min. ~3.3 h, under 4 h.
+# Sample counts match the SQuAD cloze run: data caches are keyed by sample count (never change
+# the SQuAD keys, docs/memory/cloze-eval-paragraphs-one-article.md).
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 16
+seed: 0
+run_dir: runs
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 2000
+val_samples: 64
+lr: 0.0003
+encoder_lr_scale: 0.33
+full_ratio: 0.7
+squad_full_ratio: 0.142857
+multi_full_ratio: 0.416667
+cloze_ratio: 0.285714
+squad_cloze_ratio: 0.4
+squad_cloze_val_max: 100
+# the init checkpoint was trained with fact-weighted <full>; keep it
+fact_weighting: true
+terse_dataset: EdinburghNLP/xsum
+terse_train_samples: 2000
+terse_val_samples: 32
+qa_dataset: rajpurkar/squad
+qa_train_samples: 4000
+qa_val_samples: 40
+val_recall_samples: 10
+max_chunks: 4
+max_summary_tokens: 64
+steps: 500
+batch_size: 4
+grad_accum: 2
+warmup_steps: 20
+val_interval: 100
+ckpt_interval: 100
+decoder_lora: true
+decoder_memory_adapter_rank: 8
+control_vectors: true

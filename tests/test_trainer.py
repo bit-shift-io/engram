@@ -394,3 +394,74 @@ def test_squad_cloze_val_max_caps_the_validation_set(tmp_path, monkeypatch):
     cfg = cfg_for(tmp_path, steps=2, val_interval=2, squad_cloze_ratio=0.5, squad_cloze_val_max=4)
     train(build(cfg), cfg, tr, va, answer_train=qa, answer_val=qa)
     assert 4 in seen and max(seen) <= 4 or 4 in seen
+
+
+def test_density_stage_init_from_cloze_checkpoint_without_control_vectors_or_decoder_lora(tmp_path):
+    tr, va = data()
+    cfg1 = cfg_for(tmp_path, decoder_lora=False, decoder_memory_adapter_rank=2, control_vectors=False)
+    src = build(cfg1)
+    ck = train(src, cfg1, tr, va) / "ckpt-5.pt"
+    cfg2 = cfg_for(tmp_path / "a", init_from=str(ck), decoder_lora=True, decoder_memory_adapter_rank=2,
+                   control_vectors=True)
+    eng = build(cfg2)
+    load_checkpoint(eng, ck)
+    from engram.train.losses import reconstruction_loss
+    with torch.no_grad():
+        assert torch.allclose(reconstruction_loss(eng, va), reconstruction_loss(src, va), atol=1e-6)
+
+
+def test_init_from_raises_on_missing_keys_outside_control_vectors_and_decoder_lora(tmp_path):
+    import pytest
+    tr, va = data()
+    cfg = cfg_for(tmp_path, steps=1, ckpt_interval=1)
+    ck = train(build(cfg), cfg, tr, va) / "ckpt-1.pt"
+    saved = torch.load(ck)
+    missing = next(n for n in saved["params"] if n.startswith("encoder.queries"))
+    del saved["params"][missing]
+    torch.save(saved, ck)
+    with pytest.raises(KeyError, match="encoder.queries"):
+        load_checkpoint(build(cfg), ck)
+
+
+def test_stage_a_density_config_mix_shares_sum_as_intended():
+    from collections import Counter
+
+    from engram.config import load_config
+    from engram.data.cloze import ClozeSampler
+    from engram.data.mixed import MixedSampler
+    cfg = load_config("configs/stage_a_density.yaml")
+    assert cfg.control_vectors and cfg.decoder_lora and cfg.decoder_memory_adapter_rank == 8
+    assert cfg.lr == 3e-4 and cfg.encoder_lr_scale < 1
+    tr, _ = data()
+    g = torch.Generator().manual_seed(0)
+    item = [{}]
+    s = ClozeSampler(MixedSampler(tr, item, cfg.full_ratio, 1, g, multi_full=item,
+                                  multi_ratio=cfg.multi_full_ratio, squad_full=item,
+                                  squad_ratio=cfg.squad_full_ratio),
+                     cfg.cloze_ratio, g, item, cfg.squad_cloze_ratio, 1)
+    n = 20000
+    counts = Counter(s.next()[0] for _ in range(n))
+    intended = {"terse": 0.3, "multi": 0.25, "squad_full": 0.1, "full": 0.15, "cloze": 0.1,
+                "squad_cloze": 0.1}
+    assert set(counts) == set(intended)
+    assert all(abs(counts[k] / n - v) < 0.015 for k, v in intended.items()), counts
+
+
+def _cl(recall, real, zeroed):
+    return {"real": {"cloze_recall": recall, "answer_loss": real}, "zeroed": {"answer_loss": zeroed}}
+
+
+def test_fact_gate_passes_facts_with_length_warning():
+    from engram.eval.report import fact_gate, fact_gate_markdown
+    g = fact_gate(_cl(0.13, 2.0, 3.5), {"terse_article_ratio": 0.3, "full_article_ratio": 0.9}, {})
+    assert g["facts_passed"] is True and g["length_warnings"] == ["terse_article_ratio"]
+    md = fact_gate_markdown(g)
+    assert "cloze_recall" in md and "cloze_gap" in md and "WARNING" in md
+
+
+def test_fact_gate_fails_on_either_fact_check_regardless_of_length():
+    from engram.eval.report import fact_gate
+    ok = {"terse_article_ratio": 0.1, "full_article_ratio": 0.9}
+    assert fact_gate(_cl(0.12, 2.0, 4.0), ok, {})["facts_passed"] is False
+    g = fact_gate(_cl(0.5, 2.0, 3.4), ok, {})
+    assert g["facts_passed"] is False and g["length_warnings"] == []

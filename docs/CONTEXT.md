@@ -21,3 +21,5 @@
 - **Cloze task** — training task: the decoder sees a chunk with spans blanked and outputs them, from memory. Spans are fact spans on WikiText, gold answer spans on SQuAD train paragraphs. Answer recall, not cloze loss, measures fact retention.
 - **Cloze recall** — share of blanked gold answers in SQuAD dev paragraphs that the decoder fills from memory, in any order, within its first N output segments (N = blanks). Scored with real, shuffled (another article's) and zeroed memory, alongside the gold-answer loss. Boundary: it measures whether facts are stored. Answer recall measures whether `<full>` writes them out.
 - **Aligned recall** — cloze recall counting a blank only when the segment in its own position matches. The gap to cloze recall is placement, not storage.
+- **Density stage** — training that teaches `<full>` and `<terse>` from one memory (Stage 2, or Stage A from the SQuAD cloze checkpoint). Not QA training.
+- **Fact gate** — check after a density stage that memory still stores facts: cloze recall and the real-minus-zeroed cloze loss gap above thresholds. Failing it stops the pipeline; length bands only warn.

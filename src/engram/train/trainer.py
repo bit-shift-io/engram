@@ -66,10 +66,20 @@ def save_checkpoint(eng, opt, step: int, path: Path) -> None:
 _CONTROL_ROWS = ("control.weight", "decoder.ctrl_vec.vec")  # one row per CONTROL_TOKENS entry
 
 
+def _may_start_fresh(name: str) -> bool:
+    """Control vectors and decoder LoRA are zero/no-op at init, so a checkpoint from a stage
+    without them (e.g. the SQuAD cloze run) may lack them."""
+    return name == "decoder.ctrl_vec.vec" or ("lora_" in name and ".decoder." in name)
+
+
 def load_checkpoint(eng, path, opt=None) -> int:
     """Load trainable params (and optimizer if given); returns the saved step."""
     ck = torch.load(path)
     named = dict(eng.named_parameters())
+    missing = [n for n, p in named.items() if p.requires_grad and n not in ck["params"]
+               and not _may_start_fresh(n)]
+    if missing:
+        raise KeyError(f"checkpoint {path} lacks {len(missing)} params, e.g. {missing[:3]}")
     with torch.no_grad():
         for n, v in ck["params"].items():
             p = named[n]

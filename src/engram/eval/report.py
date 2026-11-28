@@ -285,3 +285,66 @@ def rescore_markdown(s: dict) -> str:
         rows.append(f"| {name} | " + " | ".join(
             f"{c['cloze'][k]['cloze_recall']:.3f} ({c['cloze'][k]['aligned_recall']:.3f})" for k in conds) + " |")
     return "\n".join(rows)
+
+
+FACT_GATE_RECALL = 0.13  # Stage A fact gate: cloze recall (real memory)
+FACT_GATE_GAP = 1.5      # Stage A fact gate: zeroed - real cloze answer loss, nats
+LENGTH_BANDS = ("terse_article_ratio", "full_article_ratio")  # Stage 2 bands (STAGE2_GATES) reported as warnings
+
+
+def fact_gate(cloze: dict, density: dict, val: dict) -> dict:
+    """Stage A gate. Facts pass = cloze recall real >= FACT_GATE_RECALL and cloze loss gap >= FACT_GATE_GAP.
+    Length bands (the Stage 2 bands via stage3_gates) only produce warnings, never fail the gate."""
+    recall = cloze["real"]["cloze_recall"]
+    gap = cloze["zeroed"]["answer_loss"] - cloze["real"]["answer_loss"]
+    checks = {"cloze_recall": {"value": recall, "threshold": FACT_GATE_RECALL, "passed": recall >= FACT_GATE_RECALL},
+              "cloze_gap": {"value": gap, "threshold": FACT_GATE_GAP, "passed": gap >= FACT_GATE_GAP}}
+    row = {**val, **{k: density.get(k) for k in LENGTH_BANDS}}
+    warnings = [n for n in stage3_gates(row, None)["regressions"] if n in LENGTH_BANDS]
+    return {"facts_passed": all(c["passed"] for c in checks.values()), "checks": checks,
+            "length_warnings": warnings,
+            "length_values": {n: row.get(n) for n in LENGTH_BANDS}}
+
+
+def fact_gate_markdown(g: dict) -> str:
+    rows = ["# Stage A fact gate", ""]
+    for name, c in g["checks"].items():
+        rows.append(f"- {name}: {c['value']:.3f} (threshold >= {c['threshold']}) {'PASS' if c['passed'] else 'FAIL'}")
+    rows.append(f"- facts: {'PASS' if g['facts_passed'] else 'FAIL'}")
+    for n in LENGTH_BANDS:
+        v, (_, lo, hi) = g["length_values"][n], STAGE2_GATES[n]
+        warn = "WARNING" if n in g["length_warnings"] else "ok"
+        rows.append(f"- {n}: {'n/a' if v is None else f'{v:.3f}'} (band {lo} .. {hi}) {warn}")
+    return "\n".join(rows)
+
+
+# ---- Stage B final summary -----------------------------------------------------------------------
+
+def fact_qa_final(qa: dict, cloze_recall: dict, density: dict, val: dict, control: dict | None) -> dict:
+    """Stage B final: memory QA F1/EM real/shuffled/zeroed, ratio to the text-QA control vs K32_THRESHOLD
+    (None when no control: undefined, not pass), regression-gate misses as warnings, cloze recall."""
+    row = {**val, **{k: density.get(k) for k in (*LENGTH_BANDS, "terse_rouge_l")}, "qa_real_f1": qa["real"]["f1"]}
+    g = stage3_gates(row, control)
+    ratio = g["memory_over_control_f1"]
+    return {"qa": {c: qa[c] for c in ("real", "shuffled", "zeroed")}, "qa_n": qa["n"],
+            "control_f1": control.get("f1") if control else None, "ratio": ratio,
+            "ratio_passed": None if ratio is None else ratio >= K32_THRESHOLD,
+            "warnings": [n for n in g["regressions"] if n in STAGE2_GATES], "metrics": g["metrics"],
+            "cloze_recall": cloze_recall["cloze_recall"]}
+
+
+def fact_qa_final_markdown(s: dict) -> str:
+    rows = ["# Stage B final summary", "", "| memory | EM | F1 |", "|---|---|---|"]
+    rows += [f"| {c} | {s['qa'][c]['em']:.3f} | {s['qa'][c]['f1']:.3f} |" for c in ("real", "shuffled", "zeroed")]
+    ctrl = "n/a" if s["control_f1"] is None else f"{s['control_f1']:.3f}"
+    rows.append(f"\ntext-QA control F1: {ctrl} (QA n={s['qa_n']})")
+    if s["ratio"] is None:
+        rows.append(f"memory ÷ control F1: undefined (text-QA control missing), threshold {K32_THRESHOLD}")
+    else:
+        rows.append(f"memory ÷ control F1: {s['ratio']:.3f} (threshold {K32_THRESHOLD}) "
+                    f"{'PASS' if s['ratio_passed'] else 'FAIL'}")
+    rows.append(f"cloze recall: {s['cloze_recall']:.3f}")
+    for n in s["warnings"]:
+        v = s["metrics"].get(n)
+        rows.append(f"- WARNING regression gate {n}: {'n/a' if v is None else f'{v:.3f}'}")
+    return "\n".join(rows)

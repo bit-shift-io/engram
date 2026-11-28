@@ -17,5 +17,5 @@ metadata:
 - Re-scored 2026-11-28 (`scripts/rescore_cloze.py`) with exact-word answer matching on 40 paragraphs spread over 10 SQuAD dev articles. Earlier answer recall figures (5–7.5%, 0.20) came from 40 questions on only 2 paragraphs and don't compare. Baseline (fact K=16) vs SQuAD cloze:
   - Cloze recall real / shuffled / zeroed: 0.056 / 0.000 / 0.020 vs 0.168 / 0.000 / 0.031; aligned recall 0.015 vs 0.082. Loss gap 0.75 vs 1.93 nats. Memory stores facts much better.
   - Answer recall (one question per paragraph): 0.175 vs 0.175. `<full>` reconstruction does not write the extra facts out. Next fix is on the decoder side, not the memory objective.
-  - Answer recall has no zeroed control yet, so how much of 0.175 is guessing is unknown; 7/40 is ±~12 points. Pooling every question's answers per paragraph inflates it (baseline 0.375).
+  - Zeroed answer recall is 0.000 for both, so every answer hit comes from memory. Recon token F1 rose 0.24 → 0.34, yet answer recall stayed equal (7/40, ±~12 points): `<full>` uses memory for gist but does not express the extra stored facts. Pooling every question's answers per paragraph inflates answer recall (baseline 0.375).
 - Eval paragraph selection: see [[cloze-eval-paragraphs-one-article]].

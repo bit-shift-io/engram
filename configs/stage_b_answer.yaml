@@ -1,0 +1,49 @@
+# Stage B (answer stage): Stage 3 mix (50% <answer> SQuAD, 25% <full> replay half 1-chunk WikiText / half
+# whole XSum article, 25% <terse> XSum replay) plus cloze replay, from the Stage A checkpoint.
+# Run: .venv/bin/python scripts/train.py --config configs/stage_b_answer.yaml --init-from <stage A ckpt>
+# Cloze replay (cloze_ratio 0.3 WikiText, squad_cloze_ratio 0.3 SQuAD gold-answer) replaces only 1-chunk
+# <full> batches, so ~half of the <full> replay share (~12%) becomes cloze; cloze recall is the fact gate
+# kept through Stage B. Sample counts match Stage A (data caches keyed by sample count).
+# LRs as Stage A: decoder LoRA 3e-4, encoder side + memory adapter x 0.33 (docs/memory/decoder-ignores-memory.md).
+# Memory is read through the memory-only adapter (rank 8). Budget as Stage 3 (~14-16 s/step): 500 steps ~ 2.2 h
+# + vals, under 4 h.
+model_name: HuggingFaceTB/SmolLM2-135M
+device: cpu
+chunk_size: 128
+k: 16
+seed: 0
+run_dir: runs
+dataset: wikitext
+dataset_config: wikitext-103-raw-v1
+train_samples: 2000
+val_samples: 64
+lr: 0.0003
+encoder_lr_scale: 0.33
+cloze_ratio: 0.3
+squad_cloze_ratio: 0.3
+squad_cloze_val_max: 100
+fact_weighting: true
+val_recall_samples: 10
+answer_ratio: 0.5
+full_ratio: 0.5
+multi_full_ratio: 0.5
+terse_dataset: EdinburghNLP/xsum
+terse_train_samples: 2000
+terse_val_samples: 32
+qa_dataset: rajpurkar/squad
+qa_train_samples: 4000
+qa_val_samples: 40
+max_chunks: 4
+max_summary_tokens: 64
+# per-val generation: QA F1 real/shuffled/zeroed + density on 8 examples
+val_gen_samples: 8
+val_max_full_tokens: 0
+steps: 500
+batch_size: 4
+grad_accum: 2
+warmup_steps: 20
+val_interval: 100
+ckpt_interval: 100
+decoder_lora: true
+decoder_memory_adapter_rank: 8
+control_vectors: true

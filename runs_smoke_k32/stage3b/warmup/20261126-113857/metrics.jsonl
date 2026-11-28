@@ -1,3 +1,0 @@
-{"step": 1, "train_loss": 5.176861763000488, "lr": 0.0001, "grad_norm": 37.80925750732422, "n_full": 1, "n_multi": 0, "n_squad_full": 0, "n_terse": 0, "n_answer": 0, "secs": 3.956212043762207}
-{"step": 2, "train_loss": 4.879637718200684, "lr": 0.0002, "grad_norm": 23.368900299072266, "n_full": 1, "n_multi": 0, "n_squad_full": 0, "n_terse": 0, "n_answer": 0, "secs": 3.3914849758148193}
-{"step": 2, "val_loss": 4.540941745042801, "answer_val_loss": 5.988995742797852, "answer_recall": 0.0, "recon_token_f1": 0.0, "squad_full_length_ratio": 1.4545454545454546}

@@ -10,3 +10,5 @@
 - [reconstruction-keeps-gist-not-facts](reconstruction-keeps-gist-not-facts.md) — reconstruction keeps gist not facts; SQuAD gold-answer cloze stores facts (cloze recall 0.17 vs 0.06 baseline) but `<full>` does not write them out (answer recall 0.175 both); fix decoder side next
 - [k32-fails-with-extra-objectives](k32-fails-with-extra-objectives.md) — fresh K=32 stalls (real = shuffled) with SQuAD mix or fact objectives; only plain WikiText K=32 learns; prefer K=16
 - [cloze-eval-paragraphs-one-article](cloze-eval-paragraphs-one-article.md) — eval uses 40 paragraphs round-robin over 10 SQuAD articles, one question each for answer recall; pre-2026-11-28 numbers do not compare; never change SQuAD cache keys for a whole split
+- [fact-qa-stages-result](fact-qa-stages-result.md) — Stage A+B from SQuAD cloze ckpt: facts kept (gate pass, recall 0.133) but QA only 0.26× control, `<full>` collapsed to terse length
+- [smoke-runs-and-eval-sizes](smoke-runs-and-eval-sizes.md) — smoke shrinks steps and eval n only to cached sizes (QA 40/200); runs_smoke_*/ is gitignored; in-training QA checks too small to judge
